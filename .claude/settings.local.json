@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx expo install:*)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx expo config:*)",
+      "Bash(timeout 15 npx expo start:*)",
+      "WebSearch",
+      "Bash(npm uninstall:*)",
+      "Bash(timeout 20 npx expo start:*)",
+      "Bash(node:*)",
+      "Bash(timeout 25 npx expo start:*)",
+      "Bash(npm ls:*)",
+      "Bash(adb logcat:*)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(git init:*)",
+      "Bash(git submodule add:*)",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:naver.github.io)"
+    ]
+  }
+}
