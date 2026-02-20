@@ -1,0 +1,6 @@
+[submodule "server/lib/Garment3DGen"]
+	path = server/lib/Garment3DGen
+	url = https://github.com/nsarafianos/Garment3DGen.git
+[submodule "server/lib/InstantMesh"]
+	path = server/lib/InstantMesh
+	url = https://github.com/TencentARC/InstantMesh.git
