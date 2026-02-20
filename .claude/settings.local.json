@@ -20,7 +20,8 @@
       "Bash(git init:*)",
       "Bash(git submodule add:*)",
       "WebFetch(domain:pypi.org)",
-      "WebFetch(domain:naver.github.io)"
+      "WebFetch(domain:naver.github.io)",
+      "WebFetch(domain:ai.google.dev)"
     ]
   }
 }

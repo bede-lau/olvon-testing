@@ -40,3 +40,32 @@ Interpret creatively and make unexpected choices that feel genuinely designed fo
 **IMPORTANT**: Match implementation complexity to the aesthetic vision. Maximalist designs need elaborate code with extensive animations and effects. Minimalist or refined designs need restraint, precision, and careful attention to spacing, typography, and subtle details. Elegance comes from executing the vision well.
 
 Remember: Claude is capable of extraordinary creative work. Don't hold back, show what can truly be created when thinking outside the box and committing fully to a distinctive vision.
+
+## Reference Images
+- If a reference image is provided: match layout, spacing, typography, and color exactly. Swap in placeholder content (images via `https://placehold.co/`, generic copy). Do not improve or add to the design.
+- If no reference image: design from scratch with high craft (see guardrails below).
+- Screenshot your output, compare against reference, fix mismatches, re-screenshot. Do at least 2 comparison rounds. Stop only when no visible differences remain or user says so.
+
+## Output Defaults
+- Single `index.html` file, all styles inline, unless user says otherwise
+- Tailwind CSS via CDN: `<script src="https://cdn.tailwindcss.com"></script>`
+- Placeholder images: `https://placehold.co/WIDTHxHEIGHT`
+- Mobile-first responsive
+
+## Anti-Generic Guardrails
+- **Colors:** Never use default Tailwind palette (indigo-500, blue-600, etc.). Pick a custom brand color and derive from it.
+- **Shadows:** Never use flat `shadow-md`. Use layered, color-tinted shadows with low opacity.
+- **Typography:** Never use the same font for headings and body. Pair a display/serif with a clean sans. Apply tight tracking (`-0.03em`) on large headings, generous line-height (`1.7`) on body.
+- **Gradients:** Layer multiple radial gradients. Add grain/texture via SVG noise filter for depth.
+- **Animations:** Only animate `transform` and `opacity`. Never `transition-all`. Use spring-style easing.
+- **Interactive states:** Every clickable element needs hover, focus-visible, and active states. No exceptions.
+- **Images:** Add a gradient overlay (`bg-gradient-to-t from-black/60`) and a color treatment layer with `mix-blend-multiply`.
+- **Spacing:** Use intentional, consistent spacing tokens — not random Tailwind steps.
+- **Depth:** Surfaces should have a layering system (base → elevated → floating), not all sit at the same z-plane.
+
+## Hard Rules
+- Do not add sections, features, or content not in the reference
+- Do not "improve" a reference design — match it
+- Do not stop after one screenshot pass (ditch the screenshot check if user mentions that reference image is part of an animation)
+- Do not use `transition-all`
+- Do not use default Tailwind blue/indigo as primary color

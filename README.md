@@ -6,17 +6,29 @@ simulation system.
 ## Architecture
 
 ```
-┌──────────────┐     ┌───────────────────────────────────┐     ┌──────────────┐
-│    Client    │     │             Server                │     │  Visualizer  │
-│              │     │                                   │     │              │
-│ capture_     │────>│ anny_inference (body mesh)        │     │ Streamlit +  │
-│ wizard.py    │     │       ↓                           │────>│ model-viewer │
-│ (webcam +    │     │ garment_generator (t-shirt mesh)  │     │ (3D GLB      │
-│  MediaPipe)  │     │       ↓                           │     │  display)    │
-│              │     │ physics_sim.py (Blender cloth)    │     │              │
-│              │     │       ↓                           │     │              │
-│              │     │ sizing_logic (size recommendation)│     │              │
-└──────────────┘     └───────────────────────────────────┘     └──────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          VAST.AI INSTANCE                               │
+│                                                                         │
+│  ┌─────────────────────────┐     ┌───────────────────────────────────┐  │
+│  │     Streamlit Wizard    │     │             Server                │  │
+│  │    (Browser-based UI)   │     │         (ML Pipeline)             │  │
+│  │                         │     │                                   │  │
+│  │ Step 1: Body Input      │     │ anny_inference (body mesh)        │  │
+│  │ Step 2: Webcam Scan     │────>│       ↓                           │  │
+│  │   (5 angles + orient.)  │     │ garment_generator (t-shirt mesh)  │  │
+│  │ Step 3: Garment Input   │     │       ↓                           │  │
+│  │ Step 4: Generate        │     │ physics_sim.py (Blender cloth)    │  │
+│  │ Step 5: 3D Results      │<────│       ↓                           │  │
+│  │                         │     │ sizing_logic (size recommendation)│  │
+│  └─────────────────────────┘     └───────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+         ▲
+         │ Browser (HTTPS)
+         │
+    ┌────┴────┐
+    │  User   │
+    │ (local) │
+    └─────────┘
 ```
 
 **Pattern:** Real-first-with-fallback. Each ML stage attempts to load real model
@@ -25,66 +37,106 @@ weights, then falls back to parametric mesh generation using trimesh.
 ## Prerequisites
 
 - **Python 3.10+**
-- **Blender 3.6+** (for physics simulation stage)
-- **Webcam** (for client capture)
-- **CUDA GPU** (optional, for ML inference acceleration)
+- **Vast.ai account** (for GPU instance to run everything)
+- **Browser with webcam** (for body scan capture via Streamlit)
 
-## Vast.ai GPU Rental
+## Full Workflow (Unified Browser-Based)
 
-For running with real ML models on a GPU:
+Everything runs on a **vast.ai GPU instance**. You access the Streamlit wizard
+from your browser — no local setup required beyond SSH.
 
-1. **Create account** at [vast.ai](https://vast.ai)
-2. **Add credits** — $5-10 is enough for testing
-3. **Search instances** — click "Search" in the console
+---
+
+### Part 1: Set Up the Vast.ai Instance
+
+**1.1. Rent an instance:**
+
+1. Create account at [vast.ai](https://vast.ai)
+2. Add credits — $5-10 is enough for testing
+3. Search instances:
    - Filter: GPU Type = RTX 3090 or RTX 4090 or RTX 4090 Ti Super
    - Filter: Disk Space >= 50GB
    - Sort by: price (ascending)
-4. **Select a template** — choose "PyTorch 2.0+" from the template dropdown
-5. **Rent** — click "Rent" on your chosen instance
-6. **Connect** — use the SSH command shown in your instances panel:
-   ```bash
-   ssh -p <port> root@<host> -L 8080:localhost:8080
-   ```
-7. **Clone and run** on the instance:
-   ```bash
-   git clone --recursive <your-repo-url> && cd olvon-testing
-   bash setup.sh
-   python -m server.main_pipeline --input-dir server/inputs --output-dir server/outputs --height 175 --weight 75
-   ```
-8. **Download results** — scp the GLB file back to your local machine:
-   ```bash
-   scp -P <port> root@<host>:~/olvon-testing/server/outputs/final_fitted_avatar.glb .
-   ```
+4. Select template: "PyTorch 2.0+"
+5. Click "Rent"
 
-## System Dependencies
-
-### Blender Installation
-
-**Windows:**
-
-1. Download from [blender.org/download](https://www.blender.org/download/)
-2. Install and add to PATH: `C:\Program Files\Blender Foundation\Blender 3.6\`
-
-**Linux (Ubuntu/Debian):**
+**1.2. Connect from your LOCAL terminal:**
 
 ```bash
-sudo apt update
-sudo apt install blender
-# Or for latest version:
-sudo snap install blender --classic
+ssh -A -p <port> root@<host> -L 8501:localhost:8501
 ```
 
-**Verify:**
+> The `-L 8501:localhost:8501` flag forwards the Streamlit port to your local
+> machine. The `-A` flag forwards your SSH key for git cloning.
+
+**1.3. Install Blender 3.6+ and system libraries (on the instance):**
 
 ```bash
-blender --version
+apt update && apt install -y libsm6 libice6 libgl1-mesa-glx libegl1-mesa \
+  libxrandr2 libxss1 libxcursor1 libxcomposite1 libasound2 libxext6 libxi6 \
+  libxkbcommon0 libxxf86vm1
+ldconfig
+
+cd /opt
+wget https://download.blender.org/release/Blender3.6/blender-3.6.0-linux-x64.tar.xz
+tar xf blender-3.6.0-linux-x64.tar.xz
+ln -sf /opt/blender-3.6.0-linux-x64/blender /usr/local/bin/blender
+rm -f /usr/bin/blender
+hash -r
+blender --version  # Should show Blender 3.6.0
 ```
 
-### OpenGL Libraries (Linux headless servers)
+**1.4. Clone the repo and run setup (on the instance):**
 
 ```bash
-sudo apt install libgl1-mesa-glx libegl1-mesa libxrandr2 libxss1 libxcursor1 libxcomposite1 libasound2
+cd ~
+git clone --recursive git@github.com:bede-lau/olvon-testing.git && cd olvon-testing
+bash setup.sh
 ```
+
+---
+
+### Part 2: Use the Streamlit Wizard (Browser)
+
+**2.1. Start the Streamlit app (on the instance):**
+
+```bash
+streamlit run visualizer/app.py
+```
+
+**2.2. Open `http://localhost:8501` in your browser.** The wizard guides you through 5 steps:
+
+1. **Body Input** — Enter height (cm) and optional weight (kg)
+2. **Body Scan** — Take 5 photos using your browser's webcam (front, right, back, left, elevated). Each photo is validated for correct orientation. Use "Skip validation" or "Accept anyway" if auto-detection is unreliable (especially for back view).
+3. **Garment Input** — Upload a garment photo and/or enter garment measurements
+4. **Generate** — Review inputs and run the full pipeline (body mesh, garment, physics sim, sizing)
+5. **Results** — View the 3D fitted avatar (model-viewer), sizing recommendation, and pipeline log
+
+---
+
+### Part 3: Clean Up
+
+**Destroy the vast.ai instance** in your vast.ai console to stop billing.
+
+---
+
+### Alternative: Standalone Capture Wizard (LOCAL)
+
+If you prefer to capture locally with the OpenCV-based wizard (with audio feedback
+and live skeleton overlay):
+
+```bash
+cd <project-root>
+python -m venv venv && source venv/bin/activate  # or venv\Scripts\activate on Windows
+pip install -r client/requirements.txt
+python -m client.capture_wizard
+```
+
+The wizard captures 5 angles (front, right, back, left, elevated) with orientation
+detection. Captures are saved to `client/output_captures/`.
+Upload them to the instance with `scp` and run the pipeline via CLI.
+
+---
 
 ## Model Weights
 
@@ -151,54 +203,10 @@ These cache to `~/.cache/huggingface/hub/` and `~/.cache/clip/`.
 | Full setup (all auto-downloads) | ~15 GB |
 | **Recommended** | **20 GB+** |
 
-## Client Setup
-
-```bash
-cd client
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# or: venv\Scripts\activate  # Windows
-pip install -r requirements.txt
-
-# Run capture wizard (requires webcam + display)
-python -m client.capture_wizard
-```
-
-The wizard guides you through 12 capture angles with audio feedback. Press 'q'
-to quit early.
-
-## Server Setup
-
-```bash
-cd server
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# or: venv\Scripts\activate  # Windows
-pip install -r requirements.txt
-
-# Run full pipeline
-python -m server.main_pipeline --input-dir inputs --output-dir outputs
-```
-
-Stages 1-2 (body + garment mesh) run without Blender. Stage 3 (physics) requires
-Blender on PATH. Stage 4 (sizing) always runs.
-
-## Visualizer Setup
-
-```bash
-pip install -r visualizer/requirements.txt
-streamlit run visualizer/app.py
-```
-
-Opens a browser with:
-
-- 3D model viewer (drag to rotate 360 degrees, scroll to zoom)
-- Size recommendation panel
-- File upload if no pipeline output exists
-
 ## Troubleshooting
 
-**"mediapipe not installed"** — Run `pip install mediapipe` in your client venv.
+**"mediapipe not installed"** — Run `pip install mediapipe`. Included in both
+`client/requirements.txt` and root `requirements.txt`.
 
 **"Blender not found on PATH"** — Install Blender 3.6+ and ensure
 `blender --version` works in your terminal.
@@ -206,11 +214,30 @@ Opens a browser with:
 **"anny package not installed"** — Run `pip install anny` to use the real
 parametric body model. Without it, the system falls back to trimesh primitives.
 
-**Webcam not opening** — Check that no other application is using the webcam.
-Try `cv2.VideoCapture(1)` if you have multiple cameras.
+**Webcam not opening in browser** — Browser webcam requires HTTPS. Vast.ai
+typically provides HTTPS tunnels, or use SSH port forwarding (`-L 8501:localhost:8501`).
+For the standalone capture wizard, check that no other application is using the webcam.
+
+**Back view not detected** — MediaPipe may not detect a pose when facing away.
+Use "Skip validation" or "Accept anyway" in the Streamlit wizard.
 
 **Streamlit model-viewer blank** — Ensure your browser allows loading scripts
 from unpkg.com (CDN for model-viewer).
 
 **CUDA out of memory** — The fallback meshes don't require GPU. If using real
 models, try reducing batch size or using a larger GPU.
+
+**torch-sparse/torch-scatter stuck compiling** — These compile CUDA extensions
+from source if prebuilt wheels aren't found. The setup script auto-detects your
+PyTorch/CUDA versions and uses prebuilt wheels from `data.pyg.org`. If it still
+compiles from source, install manually:
+```bash
+pip install torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-<VERSION>+cu<CUDA>.html
+```
+
+**nvdiffrast build fails** — Must be installed with `--no-build-isolation` so it
+can find PyTorch. The setup script handles this automatically, but if you need to
+install manually:
+```bash
+pip install --no-build-isolation git+https://github.com/NVlabs/nvdiffrast/
+```

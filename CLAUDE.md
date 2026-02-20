@@ -2,13 +2,13 @@
 
 ## Architecture
 
-3-component system for 3D body scanning and virtual garment fitting:
+Unified browser-based system for 3D body scanning and virtual garment fitting, running on vast.ai:
 
-- **Client** (`client/`): Webcam capture wizard using MediaPipe + OpenCV + pyttsx3
+- **Client** (`client/`): Standalone webcam capture wizard using MediaPipe + OpenCV + pyttsx3 (optional, for local use)
 - **Server** (`server/`): ML inference pipeline + Blender physics simulation
   - `server/lib/Garment3DGen/` — git submodule for ML garment generation
   - `server/lib/InstantMesh/` — git submodule for photo → 3D reconstruction
-- **Visualizer** (`visualizer/`): Streamlit app with Google model-viewer for 3D display
+- **Visualizer** (`visualizer/`): Streamlit step-by-step wizard — the unified interface for body scan capture (via browser webcam), garment input, pipeline execution, and 3D result viewing
 
 ## Tech Stack
 
@@ -23,8 +23,8 @@ Every ML stage tries to load real model weights / run real ML pipelines. If unav
 
 | File | Role |
 |------|------|
-| `client/capture_wizard.py` | State machine: WAITING→VALIDATING→STABILIZING→CAPTURING→ROTATING→COMPLETE |
-| `client/utils/pose_validator.py` | MediaPipe landmark visibility + stability checks |
+| `client/capture_wizard.py` | State machine: WAITING→VALIDATING→STABILIZING→CAPTURING→ROTATING→COMPLETE (5 angles with orientation detection) |
+| `client/utils/pose_validator.py` | MediaPipe landmark visibility + stability + orientation detection (`detect_orientation()`, `validate_image_orientation()`) |
 | `client/utils/audio_feedback.py` | pyttsx3 TTS wrapper with graceful fallback |
 | `server/core/anny_inference.py` | Body mesh: ANNY parametric model via `import anny` → trimesh cylinder fallback |
 | `server/core/garment_generator.py` | T-shirt mesh: torch load attempt → trimesh box fallback + `generate_from_measurements()` |
@@ -33,7 +33,7 @@ Every ML stage tries to load real model weights / run real ML pipelines. If unav
 | `server/core/sizing_logic.py` | Math-based size recommendation from body measurements + height/weight/BMI |
 | `server/core/diagnostics.py` | Shared `PipelineLog`, `log_fallback()`, `get_gpu_snapshot()` for structured fallback logging |
 | `server/main_pipeline.py` | CLI orchestrator calling all 4 stages, accepts garment photo/measurements/height/weight |
-| `visualizer/app.py` | Streamlit + model-viewer GLB display with body input sidebar + in-process pipeline execution |
+| `visualizer/app.py` | Streamlit 5-step wizard: body input → webcam scan (5 angles with orientation validation) → garment input → pipeline execution → 3D results |
 
 ## Sizing Logic
 
@@ -73,7 +73,9 @@ Auto-downloaded model caches: `~/.cache/huggingface/hub/`, `~/.cache/clip/`
 - Garment model weights (`garment_checkpoint.pth`) are not available — garment fallback meshes always used
 - Garment3DGen + InstantMesh require CUDA GPU and submodule init
 - physics_sim.py requires Blender 3.6+ installed and on PATH
-- Capture wizard requires physical webcam + display
+- Standalone capture wizard requires physical webcam + display; Streamlit wizard uses browser webcam via `st.camera_input`
+- Browser webcam capture requires HTTPS (vast.ai typically provides HTTPS tunnels)
+- Back-view orientation detection is unreliable (MediaPipe may not detect pose); "Accept anyway" / "Skip validation" provided as overrides
 
 ## Quick Commands
 

@@ -14,15 +14,12 @@ MESSAGES = {
     "validation_fail": "Could not detect full body. Please step back and ensure your full body is visible.",
     "complete": "All captures complete. You may close the window.",
     "turn_front": "Face the camera directly.",
-    "turn_front_right": "Turn slightly to your right.",
     "turn_right": "Turn to face your right side.",
-    "turn_back_right": "Continue turning right, almost facing away.",
     "turn_back": "Turn to face away from the camera.",
-    "turn_back_left": "Continue turning, now showing your left back.",
     "turn_left": "Turn to face your left side.",
-    "turn_front_left": "Almost done turning, face slightly left.",
     "turn_elevated": "Look slightly upward for the elevated capture.",
     "stabilizing": "Good pose detected. Hold still for one second.",
+    "wrong_orientation": "Wrong orientation detected. Please adjust your position.",
 }
 
 
