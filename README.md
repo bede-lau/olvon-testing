@@ -107,7 +107,7 @@ streamlit run visualizer/app.py
 **2.2. Open `http://localhost:8501` in your browser.** The wizard guides you through 5 steps:
 
 1. **Body Input** — Enter height (cm) and optional weight (kg)
-2. **Body Scan** — Take 5 photos using your browser's webcam (front, right, back, left, elevated). Each photo is validated for correct orientation. Use "Skip validation" or "Accept anyway" if auto-detection is unreliable (especially for back view).
+2. **Body Scan** — Live video feed via your browser's webcam (using streamlit-webrtc). The system runs real-time pose detection, shows a skeleton overlay with orientation feedback, and **automatically captures** each angle (front, right, back, left, elevated) when you hold the correct pose for 2 seconds. Use "Skip validation" if auto-detection is unreliable (especially for back view).
 3. **Garment Input** — Upload a garment photo and/or enter garment measurements
 4. **Generate** — Review inputs and run the full pipeline (body mesh, garment, physics sim, sizing)
 5. **Results** — View the 3D fitted avatar (model-viewer), sizing recommendation, and pipeline log

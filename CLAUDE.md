@@ -12,7 +12,7 @@ Unified browser-based system for 3D body scanning and virtual garment fitting, r
 
 ## Tech Stack
 
-- Python 3.10+, MediaPipe, OpenCV, pyttsx3, PyTorch, trimesh, Blender (bpy subprocess), Streamlit
+- Python 3.10+, MediaPipe, OpenCV, pyttsx3, PyTorch, trimesh, Blender (bpy subprocess), Streamlit, streamlit-webrtc
 - Garment3DGen + InstantMesh (optional GPU dependencies: PyTorch3D, nvdiffrast, CLIP)
 
 ## Key Pattern: Real-First-With-Fallback
@@ -33,7 +33,7 @@ Every ML stage tries to load real model weights / run real ML pipelines. If unav
 | `server/core/sizing_logic.py` | Math-based size recommendation from body measurements + height/weight/BMI |
 | `server/core/diagnostics.py` | Shared `PipelineLog`, `log_fallback()`, `get_gpu_snapshot()` for structured fallback logging |
 | `server/main_pipeline.py` | CLI orchestrator calling all 4 stages, accepts garment photo/measurements/height/weight |
-| `visualizer/app.py` | Streamlit 5-step wizard: body input → webcam scan (5 angles with orientation validation) → garment input → pipeline execution → 3D results |
+| `visualizer/app.py` | Streamlit 5-step wizard: body input → live webcam scan via streamlit-webrtc with auto-capture (5 angles, real-time pose overlay + orientation detection) → garment input → pipeline execution → 3D results |
 
 ## Sizing Logic
 
@@ -73,9 +73,10 @@ Auto-downloaded model caches: `~/.cache/huggingface/hub/`, `~/.cache/clip/`
 - Garment model weights (`garment_checkpoint.pth`) are not available — garment fallback meshes always used
 - Garment3DGen + InstantMesh require CUDA GPU and submodule init
 - physics_sim.py requires Blender 3.6+ installed and on PATH
-- Standalone capture wizard requires physical webcam + display; Streamlit wizard uses browser webcam via `st.camera_input`
-- Browser webcam capture requires HTTPS (vast.ai typically provides HTTPS tunnels)
-- Back-view orientation detection is unreliable (MediaPipe may not detect pose); "Accept anyway" / "Skip validation" provided as overrides
+- Standalone capture wizard requires physical webcam + display; Streamlit wizard uses live video via streamlit-webrtc with auto-capture
+- Browser webcam capture requires HTTPS (vast.ai typically provides HTTPS tunnels); WebRTC also needs STUN server (configured to use Google's public STUN)
+- Back-view orientation detection is unreliable (MediaPipe may not detect pose); "Skip validation" checkbox bypasses orientation check
+- `BodyScanProcessor` runs MediaPipe in a worker thread; communicates captures to main thread via `queue.Queue`
 
 ## Quick Commands
 

@@ -1,17 +1,33 @@
 """
 Streamlit unified wizard for body scanning, garment input, pipeline execution,
 and 3D result viewing. Runs entirely on vast.ai — users access via browser.
+
+Body scan uses streamlit-webrtc for live video analysis with automatic capture
+when the user's pose orientation is correct and stable.
 """
 
 import base64
 import json
 import logging
+import queue
+import sys
+import threading
+import time
 from pathlib import Path
 from io import BytesIO
 
+# Ensure project root is on sys.path so `server.*` / `client.*` imports work
+# regardless of the working directory Streamlit uses.
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+import av
+import cv2
 import numpy as np
 import streamlit as st
 import streamlit.components.v1 as components
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, VideoProcessorBase
 
 st.set_page_config(page_title="Olvon Physics Test", layout="wide")
 
@@ -26,8 +42,249 @@ for d in [OUTPUT_DIR, INPUT_DIR, GARMENT_PHOTO_DIR]:
 
 # 5 capture angles
 SCAN_ANGLES = ["front", "right", "back", "left", "elevated"]
+SCAN_INSTRUCTIONS = {
+    "front": "Face the camera directly. Ensure your full body is visible.",
+    "right": "Turn so your RIGHT side faces the camera.",
+    "back": "Turn to face AWAY from the camera.",
+    "left": "Turn so your LEFT side faces the camera.",
+    "elevated": "Face the camera and look slightly UPWARD.",
+}
 
 STEP_LABELS = ["Body Input", "Body Scan", "Garment Input", "Generate", "Results"]
+
+# Auto-capture timing
+STABILITY_HOLD_SECONDS = 2.0  # hold correct pose for this long to auto-capture
+
+
+# ---------------------------------------------------------------------------
+# Body scan video processor (runs in a worker thread)
+# ---------------------------------------------------------------------------
+class BodyScanProcessor(VideoProcessorBase):
+    """
+    Processes each video frame: runs MediaPipe pose detection, checks orientation,
+    draws overlay, and auto-captures when conditions are met.
+
+    Communication with main thread:
+    - capture_queue: sends (angle_name, bgr_image) when auto-capture triggers
+    - target_angle / skip_validation: set by main thread to control behavior
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.capture_queue: queue.Queue = queue.Queue()
+
+        # Controlled by main thread
+        self._target_angle: str = "front"
+        self._skip_validation: bool = False
+        self._active: bool = True  # set False to stop processing
+
+        # Internal state (worker thread only)
+        self._stability_start: float | None = None
+        self._detected_orientation: str = "unknown"
+        self._body_visible: bool = False
+        self._captured: bool = False  # prevents double-capture for same angle
+        self._frame_count: int = 0
+
+        # Lazy-init MediaPipe landmarker (heavy, do once)
+        self._landmarker = None
+        self._mp = None
+        self._init_error: str | None = None
+
+    def _init_mediapipe(self):
+        """Initialize MediaPipe pose landmarker (called once on first frame)."""
+        try:
+            import mediapipe as mp
+            from client.utils.pose_validator import _ensure_model, MODEL_PATH
+
+            _ensure_model()
+
+            options = mp.tasks.vision.PoseLandmarkerOptions(
+                base_options=mp.tasks.BaseOptions(
+                    model_asset_path=str(MODEL_PATH)
+                ),
+                running_mode=mp.tasks.vision.RunningMode.VIDEO,
+                min_pose_detection_confidence=0.5,
+                min_tracking_confidence=0.5,
+            )
+            self._landmarker = mp.tasks.vision.PoseLandmarker.create_from_options(
+                options
+            )
+            self._mp = mp
+        except Exception as e:
+            self._init_error = str(e)
+
+    @property
+    def target_angle(self) -> str:
+        with self._lock:
+            return self._target_angle
+
+    @target_angle.setter
+    def target_angle(self, value: str):
+        with self._lock:
+            if self._target_angle != value:
+                self._target_angle = value
+                self._stability_start = None
+                self._captured = False
+
+    @property
+    def skip_validation(self) -> bool:
+        with self._lock:
+            return self._skip_validation
+
+    @skip_validation.setter
+    def skip_validation(self, value: bool):
+        with self._lock:
+            self._skip_validation = value
+
+    @property
+    def active(self) -> bool:
+        with self._lock:
+            return self._active
+
+    @active.setter
+    def active(self, value: bool):
+        with self._lock:
+            self._active = value
+
+    def reset_for_angle(self, angle: str):
+        """Reset state for a new angle (called from main thread)."""
+        with self._lock:
+            self._target_angle = angle
+            self._stability_start = None
+            self._captured = False
+
+    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
+        img = frame.to_ndarray(format="bgr24")
+        self._frame_count += 1
+
+        if not self.active:
+            return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+        # Lazy init
+        if self._landmarker is None and self._init_error is None:
+            self._init_mediapipe()
+
+        if self._init_error:
+            cv2.putText(
+                img, f"MediaPipe error: {self._init_error[:60]}",
+                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2,
+            )
+            return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+        # Run pose detection
+        frame_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        mp_image = self._mp.Image(
+            image_format=self._mp.ImageFormat.SRGB, data=frame_rgb
+        )
+        timestamp_ms = self._frame_count * 33  # ~30fps
+        result = self._landmarker.detect_for_video(mp_image, timestamp_ms)
+
+        landmarks = None
+        if result.pose_landmarks and len(result.pose_landmarks) > 0:
+            landmarks = result.pose_landmarks[0]
+
+        # Analyze pose
+        with self._lock:
+            target = self._target_angle
+            skip = self._skip_validation
+            already_captured = self._captured
+
+        body_visible = False
+        orientation_ok = False
+        detected = "unknown"
+
+        if landmarks:
+            from client.utils.pose_validator import (
+                check_full_body_visible,
+                detect_orientation,
+            )
+
+            body_visible = check_full_body_visible(landmarks)
+            detected = detect_orientation(landmarks)
+            orientation_ok = skip or (detected == target)
+
+        self._body_visible = body_visible
+        self._detected_orientation = detected
+
+        # Stability tracking
+        now = time.monotonic()
+        if body_visible and orientation_ok and not already_captured:
+            if self._stability_start is None:
+                self._stability_start = now
+            elapsed = now - self._stability_start
+            remaining = max(0, STABILITY_HOLD_SECONDS - elapsed)
+
+            if elapsed >= STABILITY_HOLD_SECONDS:
+                # Auto-capture!
+                with self._lock:
+                    self._captured = True
+                self._stability_start = None
+                self.capture_queue.put((target, img.copy()))
+        else:
+            if not body_visible or not orientation_ok:
+                self._stability_start = None
+
+        # --- Draw overlay ---
+        h, w = img.shape[:2]
+
+        # Draw skeleton landmarks
+        if landmarks:
+            for lm in landmarks:
+                cx, cy = int(lm.x * w), int(lm.y * h)
+                cv2.circle(img, (cx, cy), 3, (0, 255, 0), -1)
+
+        # Status bar background
+        overlay = img.copy()
+        cv2.rectangle(overlay, (0, 0), (w, 90), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
+
+        # Angle info
+        status_color = (0, 255, 0) if orientation_ok and body_visible else (0, 0, 255)
+        cv2.putText(
+            img, f"Target: {target.upper()}",
+            (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2,
+        )
+        cv2.putText(
+            img, f"Detected: {detected.upper()}",
+            (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2,
+        )
+
+        # Body visibility
+        vis_text = "Body: VISIBLE" if body_visible else "Body: NOT VISIBLE"
+        vis_color = (0, 255, 0) if body_visible else (0, 0, 255)
+        cv2.putText(
+            img, vis_text, (w - 250, 25),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.6, vis_color, 2,
+        )
+
+        if already_captured:
+            cv2.putText(
+                img, "CAPTURED - waiting for next angle...",
+                (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2,
+            )
+        elif body_visible and orientation_ok and self._stability_start is not None:
+            elapsed = now - self._stability_start
+            remaining = max(0, STABILITY_HOLD_SECONDS - elapsed)
+            # Countdown bar
+            progress = min(1.0, elapsed / STABILITY_HOLD_SECONDS)
+            bar_w = int(w * progress)
+            cv2.rectangle(img, (0, h - 20), (bar_w, h), (0, 255, 0), -1)
+            cv2.putText(
+                img, f"Hold still: {remaining:.1f}s",
+                (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2,
+            )
+        elif not body_visible:
+            cv2.putText(
+                img, "Step back so full body is visible",
+                (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2,
+            )
+        elif not orientation_ok:
+            cv2.putText(
+                img, f"Please turn to show {target.upper()} view",
+                (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2,
+            )
+
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 
 # ---------------------------------------------------------------------------
@@ -38,14 +295,13 @@ def init_session():
         "step": 0,
         "height_cm": 170.0,
         "weight_kg": 0.0,
-        "captured_images": {},       # {angle_name: image_bytes}
+        "captured_images": {},       # {angle_name: image_bytes (PNG-encoded)}
         "scan_angle_idx": 0,
         "garment_photo_path": None,
         "garment_measurements": None,
         "fabric": "cotton",
         "sizing_result": None,
         "pipeline_ran": False,
-        "capture_attempt": {},       # {angle_name: int} for unique widget keys
         "skip_validation": False,
     }
     for k, v in defaults.items():
@@ -151,29 +407,6 @@ def render_pipeline_log(sizing_data: dict):
             st.text("Pipeline completed successfully - no fallbacks triggered.")
 
 
-def resize_image_bytes(image_bytes: bytes, max_w: int = 1280, max_h: int = 720) -> np.ndarray:
-    """Decode image bytes, resize to fit within max dimensions, return RGB numpy array."""
-    import cv2
-    arr = np.frombuffer(image_bytes, dtype=np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if img is None:
-        return None
-    h, w = img.shape[:2]
-    if w > max_w or h > max_h:
-        scale = min(max_w / w, max_h / h)
-        img = cv2.resize(img, (int(w * scale), int(h * scale)))
-    return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-
-def validate_captured_image(image_rgb: np.ndarray, expected: str) -> tuple[bool, str, str]:
-    """Server-side orientation validation for a captured image."""
-    try:
-        from client.utils.pose_validator import validate_image_orientation
-        return validate_image_orientation(image_rgb, expected)
-    except Exception as e:
-        return True, "unknown", f"Validation unavailable: {e}"
-
-
 def run_pipeline(height_cm, weight_kg, garment_photo_path, garment_measurements, fabric):
     from server.main_pipeline import PhysicsTestPipeline
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -216,6 +449,11 @@ def render_step_body_input():
 
 def render_step_body_scan():
     st.header("Step 2: Body Scan")
+    st.markdown(
+        "Stand in front of your camera with your **full body visible**. "
+        "The system will automatically detect your orientation and capture "
+        "each angle when you hold the correct pose for 2 seconds."
+    )
 
     captured = st.session_state.captured_images
     angle_idx = st.session_state.scan_angle_idx
@@ -231,6 +469,7 @@ def render_step_body_scan():
                 else:
                     st.markdown(f"*{angle}*")
 
+    # All done?
     if angle_idx >= len(SCAN_ANGLES):
         st.success(f"All {len(SCAN_ANGLES)} angles captured!")
         col1, col2 = st.columns(2)
@@ -246,15 +485,7 @@ def render_step_body_scan():
 
     current_angle = SCAN_ANGLES[angle_idx]
     st.subheader(f"Angle {angle_idx + 1}/{len(SCAN_ANGLES)}: {current_angle.upper()}")
-
-    instructions = {
-        "front": "Face the camera directly. Ensure your full body is visible.",
-        "right": "Turn so your right side faces the camera.",
-        "back": "Turn to face away from the camera.",
-        "left": "Turn so your left side faces the camera.",
-        "elevated": "Face the camera and look slightly upward.",
-    }
-    st.info(instructions.get(current_angle, "Position yourself for this angle."))
+    st.info(SCAN_INSTRUCTIONS.get(current_angle, "Position yourself for this angle."))
 
     # Skip validation toggle
     st.session_state.skip_validation = st.checkbox(
@@ -263,49 +494,53 @@ def render_step_body_scan():
         help="Enable if auto-detection isn't working (e.g., back view is unreliable).",
     )
 
-    # Unique key per angle + attempt
-    if current_angle not in st.session_state.capture_attempt:
-        st.session_state.capture_attempt[current_angle] = 0
-    attempt = st.session_state.capture_attempt[current_angle]
-    widget_key = f"cam_{current_angle}_{attempt}"
+    # WebRTC video stream with auto-capture
+    ctx = webrtc_streamer(
+        key="body_scan",
+        mode=WebRtcMode.SENDRECV,
+        video_processor_factory=BodyScanProcessor,
+        media_stream_constraints={
+            "video": {
+                "width": {"ideal": 1280},
+                "height": {"ideal": 720},
+                "facingMode": "user",
+            },
+            "audio": False,
+        },
+        rtc_configuration={
+            "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+        },
+        async_processing=True,
+    )
 
-    photo = st.camera_input(f"Take {current_angle} photo", key=widget_key)
+    # Update processor settings from main thread
+    if ctx.video_processor:
+        ctx.video_processor.target_angle = current_angle
+        ctx.video_processor.skip_validation = st.session_state.skip_validation
 
-    if photo is not None:
-        image_bytes = photo.getvalue()
-        image_rgb = resize_image_bytes(image_bytes)
+    # Poll for auto-captured frames
+    if ctx.state.playing and ctx.video_processor:
+        try:
+            angle_name, bgr_img = ctx.video_processor.capture_queue.get_nowait()
+            # Encode as PNG bytes for storage
+            _, png_buf = cv2.imencode(".png", bgr_img)
+            png_bytes = png_buf.tobytes()
+            st.session_state.captured_images[angle_name] = png_bytes
+            st.session_state.scan_angle_idx += 1
 
-        if image_rgb is None:
-            st.error("Failed to decode image. Please try again.")
-            return
-
-        # Validate orientation
-        if st.session_state.skip_validation:
-            accepted, detected, msg = True, "skipped", "Validation skipped"
-        else:
-            accepted, detected, msg = validate_captured_image(image_rgb, current_angle)
-
-        if accepted:
-            st.success(f"Accepted! {msg}")
-            # Store the raw bytes for saving later
-            st.session_state.captured_images[current_angle] = image_bytes
-            st.session_state.scan_angle_idx = angle_idx + 1
+            # Advance to next angle (processor will pick up new target on next rerun)
+            st.success(f"Captured {angle_name} view!")
+            time.sleep(0.5)  # brief pause so user sees success message
             st.rerun()
-        else:
-            st.error(f"Rejected: {msg}")
-            st.markdown(f"**Expected:** {current_angle.upper()} | **Detected:** {detected.upper()}")
+        except queue.Empty:
+            pass
 
-            # Manual accept for difficult angles (especially back)
-            col_retry, col_accept = st.columns(2)
-            with col_retry:
-                if st.button("Retake"):
-                    st.session_state.capture_attempt[current_angle] = attempt + 1
-                    st.rerun()
-            with col_accept:
-                if st.button("Accept anyway"):
-                    st.session_state.captured_images[current_angle] = image_bytes
-                    st.session_state.scan_angle_idx = angle_idx + 1
-                    st.rerun()
+    # Manual capture fallback button
+    if ctx.state.playing and ctx.video_processor:
+        if st.button("Capture manually (skip auto-detect)"):
+            # Grab latest frame from processor
+            ctx.video_processor.skip_validation = True
+            st.markdown("*Manual capture: hold still for 2 seconds...*")
 
     # Navigation
     st.markdown("---")
@@ -385,7 +620,6 @@ def render_step_generate():
 
     if st.button("Generate", type="primary", use_container_width=True):
         # Save captured images to server/inputs/
-        import cv2
         for angle_name, img_bytes in st.session_state.captured_images.items():
             arr = np.frombuffer(img_bytes, dtype=np.uint8)
             img = cv2.imdecode(arr, cv2.IMREAD_COLOR)

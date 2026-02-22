@@ -21,7 +21,11 @@
       "Bash(git submodule add:*)",
       "WebFetch(domain:pypi.org)",
       "WebFetch(domain:naver.github.io)",
-      "WebFetch(domain:ai.google.dev)"
+      "WebFetch(domain:ai.google.dev)",
+      "WebFetch(domain:whitphx.github.io)",
+      "WebFetch(domain:towardsdatascience.com)",
+      "WebFetch(domain:gist.github.com)",
+      "WebFetch(domain:blog.streamlit.io)"
     ]
   }
 }
