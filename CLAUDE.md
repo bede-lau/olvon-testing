@@ -1,81 +1,91 @@
-# Olvon Physics Test - Project Context
+# Olvon VTON - Project Context
 
 ## Architecture
 
-Unified browser-based system for 3D body scanning and virtual garment fitting, running on vast.ai:
+Unified browser-based system for 2D virtual try-on and body measurement, running on vast.ai:
 
 - **Client** (`client/`): Standalone webcam capture wizard using MediaPipe + OpenCV + pyttsx3 (optional, for local use)
-- **Server** (`server/`): ML inference pipeline + Blender physics simulation
-  - `server/lib/Garment3DGen/` — git submodule for ML garment generation
-  - `server/lib/InstantMesh/` — git submodule for photo → 3D reconstruction
-- **Visualizer** (`visualizer/`): Streamlit step-by-step wizard — the unified interface for body scan capture (via browser webcam), garment input, pipeline execution, and 3D result viewing
+- **Server** (`server/`): 2D VTON pipeline using FASHN VTON v1.5 + MediaPipe body measurements
+- **Visualizer** (`visualizer/`): Streamlit 4-step wizard — body input, webcam scan (3 angles), garment upload, results (feed video + virtual dressing room)
 
 ## Tech Stack
 
-- Python 3.10+, MediaPipe, OpenCV, pyttsx3, PyTorch, trimesh, Blender (bpy subprocess), Streamlit, streamlit-webrtc
-- Garment3DGen + InstantMesh (optional GPU dependencies: PyTorch3D, nvdiffrast, CLIP)
+- Python 3.10+, MediaPipe, OpenCV, PyTorch, FASHN VTON v1.5, FFmpeg, Streamlit, streamlit-webrtc
 
 ## Key Pattern: Real-First-With-Fallback
 
-Every ML stage tries to load real model weights / run real ML pipelines. If unavailable, it falls back to parametric mesh generation via trimesh. This lets the full pipeline run without any trained models or GPU.
+Every stage tries real inference first, then falls back gracefully:
+- FASHN VTON → returns None (no try-on image)
+- MediaPipe landmarks → height/weight empirical formulas → population averages
+- FFmpeg → returns None (no feed video)
 
 ## File Purposes
 
 | File | Role |
 |------|------|
-| `client/capture_wizard.py` | State machine: WAITING→VALIDATING→STABILIZING→CAPTURING→ROTATING→COMPLETE (5 angles with orientation detection) |
-| `client/utils/pose_validator.py` | MediaPipe landmark visibility + stability + orientation detection (`detect_orientation()`, `validate_image_orientation()`) |
+| `client/capture_wizard.py` | State machine: standalone webcam capture (5 angles with orientation detection) |
+| `client/utils/pose_validator.py` | MediaPipe landmark visibility + stability + orientation detection |
 | `client/utils/audio_feedback.py` | pyttsx3 TTS wrapper with graceful fallback |
-| `server/core/anny_inference.py` | Body mesh: ANNY parametric model via `import anny` → trimesh cylinder fallback |
-| `server/core/garment_generator.py` | T-shirt mesh: torch load attempt → trimesh box fallback + `generate_from_measurements()` |
-| `server/core/garment_3dgen.py` | Garment3DGen + InstantMesh wrapper (photo → 3D garment) with staged fallback |
-| `server/core/physics_sim.py` | Blender bpy script (subprocess only, not importable) |
+| `server/core/body_measurements.py` | MediaPipe pose landmarks → body measurements (chest, waist, hip, shoulder_width) with fallback chain |
+| `server/core/tryon_worker.py` | FASHN VTON v1.5 wrapper — person photo + garment photo → 2D try-on image |
+| `server/core/feed_generator.py` | FFmpeg-based feed video generator (1080x1440, crossfade slideshow) |
 | `server/core/sizing_logic.py` | Math-based size recommendation from body measurements + height/weight/BMI |
 | `server/core/diagnostics.py` | Shared `PipelineLog`, `log_fallback()`, `get_gpu_snapshot()` for structured fallback logging |
-| `server/main_pipeline.py` | CLI orchestrator calling all 4 stages, accepts garment photo/measurements/height/weight |
-| `visualizer/app.py` | Streamlit 5-step wizard: body input → live webcam scan via streamlit-webrtc with auto-capture (5 angles, real-time pose overlay + orientation detection) → garment input → pipeline execution → 3D results |
+| `server/main_pipeline.py` | CLI orchestrator: measurements → try-on → sizing → feed video |
+| `visualizer/app.py` | Streamlit 4-step wizard: body input → 3-angle webcam scan → garment input → results (feed video + virtual dressing room) |
+
+## Pipeline Flow
+
+1. `body_measurements.extract(front_photo, side_photo, height, weight)` → measurements dict
+2. `tryon_worker.generate()` per garment × per view (front + back) → try-on images
+3. `sizing_logic.recommend_size(measurements)` → sizing result
+4. `feed_generator.generate_feed_video(front_tryon_images)` → feed video
 
 ## Sizing Logic
 
 - `recommend_size()` accepts `height_cm` and `weight_kg` in `body_measurements` dict
-- Height + Weight → BMI-derived estimates blended 60/40 with mesh measurements
+- Height + Weight → BMI-derived estimates blended 60/40 with measurement estimates
 - Height only → proportional estimates blended 70/30
-- Neither → backward compatible, mesh-only behavior
+- Neither → backward compatible, measurement-only behavior
 - Returns `bmi`, `height_cm`, `weight_kg` in `measurements` when provided
 
-## Garment Generation Flow
+## Body Measurements
 
-1. **Photo provided** → Try Garment3DGen + InstantMesh (GPU required)
-2. **Measurements provided** → Parametric mesh from explicit dimensions via `generate_from_measurements()`
-3. **Neither** → Body-relative parametric T-shirt (existing fallback)
+- Fallback chain: MediaPipe landmarks → height/weight empirical → population averages
+- Landmarks: nose-to-ankle pixel distance + known height → pixel-to-cm ratio
+- Circumferences: `width * π * correction_factor`
+- Reuses `client/utils/pose_validator._ensure_model()` for model download
+
+## Virtual Try-On
+
+- FASHN VTON v1.5 (Apache 2.0 license)
+- Input: person photo (full body) + garment photo → output: 2D photorealistic try-on image
+- Handles face rendering natively — no compositing needed
+- ~2GB weights, ~8GB VRAM
+- Falls back to None when unavailable
 
 ## Vast.ai Deployment
 
 ```bash
-git clone --recursive <repo-url>
+git clone <repo-url>
 cd olvon-testing
 bash setup.sh
-streamlit run visualizer/app.py  # accessible on port 8501 (0.0.0.0)
+streamlit run visualizer/app.py --server.address=0.0.0.0
 ```
 
 ## Model Weights
 
 | Model | Type | Location / Install |
 |-------|------|--------------------|
-| ANNY | pip package (~42 MB) | `pip install anny` — all model data ships with the package |
-| InstantMesh | HuggingFace checkpoints (~3.24 GB) | `server/lib/InstantMesh/ckpts/` — download from `TencentARC/InstantMesh` |
-| Garment3DGen | Optimization-based (no weights) | CLIP + Fashion-CLIP auto-download on first run (~690 MB) |
-
-Auto-downloaded model caches: `~/.cache/huggingface/hub/`, `~/.cache/clip/`
+| FASHN VTON v1.5 | Diffusion model (~2 GB) | `server/lib/fashn-vton/weights/` — downloaded via setup.sh |
+| MediaPipe Pose | Task file (~26 MB) | `client/assets/pose_landmarker_heavy.task` — auto-downloaded on first use |
 
 ## Known Gaps
 
-- Garment model weights (`garment_checkpoint.pth`) are not available — garment fallback meshes always used
-- Garment3DGen + InstantMesh require CUDA GPU and submodule init
-- physics_sim.py requires Blender 3.6+ installed and on PATH
-- Standalone capture wizard requires physical webcam + display; Streamlit wizard uses live video via streamlit-webrtc with auto-capture
-- Browser webcam capture requires HTTPS (vast.ai typically provides HTTPS tunnels); WebRTC also needs STUN server (configured to use Google's public STUN)
-- Back-view orientation detection is unreliable (MediaPipe may not detect pose); "Skip validation" checkbox bypasses orientation check
+- FASHN VTON requires CUDA GPU (~8GB VRAM) for inference
+- FFmpeg required for feed video generation
+- Back-view orientation detection is unreliable (MediaPipe may not detect pose); uses face-absence + countdown
+- Browser webcam capture requires HTTPS; WebRTC needs STUN server (Google's public STUN configured)
 - `BodyScanProcessor` runs MediaPipe in a worker thread; communicates captures to main thread via `queue.Queue`
 
 ## Quick Commands
@@ -84,14 +94,11 @@ Auto-downloaded model caches: `~/.cache/huggingface/hub/`, `~/.cache/clip/`
 # Self-test sizing logic
 python server/core/sizing_logic.py
 
-# Run pipeline (stages 1-2 work without Blender)
-python -m server.main_pipeline --input-dir server/inputs --output-dir server/outputs --height 175 --weight 75
+# Run pipeline
+python -m server.main_pipeline --front-photo test.jpg --height 175 --weight 75 --garment-photo garment.jpg --category tops
 
-# Run pipeline with garment photo
-python -m server.main_pipeline --garment-photo path/to/photo.jpg --height 175
-
-# Run tests (no Blender needed)
-python -m pytest tests/test_pipeline_no_blender.py -v
+# Run tests
+python -m pytest tests/test_pipeline.py -v
 
 # Launch visualizer (accessible on 0.0.0.0:8501)
 streamlit run visualizer/app.py
@@ -102,10 +109,9 @@ python -m client.capture_wizard
 
 ## Conventions
 
-- Blender script uses `bpy.ops.wm.obj_import()` (3.6+ API), not deprecated `bpy.ops.import_scene.obj()`
-- Garment positioned 0.3m above body for physics gravity drop
-- Sizing from bounding box: chest = x_extent * pi, waist = chest * 0.85
-- model-viewer loaded via CDN (unpkg.com), no local JS bundling
 - Streamlit binds 0.0.0.0:8501 via `.streamlit/config.toml`
 - All ML fallbacks logged via `server/core/diagnostics.py` with GPU state
 - Pipeline log passed through to Streamlit UI (collapsible expander)
+- Feed video: 1080x1440, H.264, yuv420p, crossfade transitions
+- VTON runs twice per garment in dressing room: front photo + back photo
+- Dressing room results cached in session state per garment index

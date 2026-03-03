@@ -1,224 +1,188 @@
 """
-Orchestrator pipeline: body inference -> garment generation -> physics sim -> sizing.
+Orchestrator pipeline: body measurements -> virtual try-on -> sizing -> feed video.
+
+2D VTON pipeline using FASHN VTON v1.5 for photorealistic virtual try-on.
 """
 
 import argparse
 import json
 import logging
-import math
-import shutil
-import subprocess
-import sys
 from pathlib import Path
 
-import numpy as np
-import trimesh
-
-from server.core.anny_inference import BodyMeshInference
-from server.core.diagnostics import PipelineLog, log_fallback
-from server.core.garment_3dgen import Garment3DGenWrapper
-from server.core.garment_generator import GarmentGenerator
+from server.core.body_measurements import extract as extract_measurements
+from server.core.diagnostics import PipelineLog
+from server.core.feed_generator import generate_feed_video
 from server.core.sizing_logic import recommend_size
+from server.core.tryon_worker import TryOnWorker
 
 logger = logging.getLogger(__name__)
 
 
-class PhysicsTestPipeline:
-    """End-to-end pipeline: body mesh -> garment -> physics sim -> sizing."""
+class VTONPipeline:
+    """End-to-end pipeline: measurements -> try-on -> sizing -> feed video."""
 
     def __init__(
         self,
-        input_dir: str | Path = "server/inputs",
         output_dir: str | Path = "server/outputs",
-        weights_dir: str | Path = "server/assets/weights",
+        weights_dir: str | Path = "server/lib/fashn-vton/weights",
     ):
-        self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
-        self.weights_dir = Path(weights_dir)
-
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        (self.input_dir / "garment_photos").mkdir(parents=True, exist_ok=True)
 
         self.pipeline_log = PipelineLog()
-
-        self.body_inference = BodyMeshInference(self.weights_dir)
-        self.body_inference._pipeline_log = self.pipeline_log
-
-        self.garment_generator = GarmentGenerator(self.weights_dir)
-        self.garment_generator._pipeline_log = self.pipeline_log
-
-        self.garment_3dgen = Garment3DGenWrapper()
-        self.garment_3dgen._pipeline_log = self.pipeline_log
-
-    def _extract_measurements_from_mesh(self, mesh_path: Path) -> dict:
-        """
-        Approximate body measurements from mesh bounding box.
-        chest = x_extent * pi (circumference approximation)
-        height = y_extent
-        waist = chest * 0.85 (approximate ratio)
-        """
-        mesh = trimesh.load(str(mesh_path))
-        bbox = mesh.bounding_box.extents  # (x, y, z)
-
-        chest_circumference = bbox[0] * math.pi * 100  # convert m -> cm
-        height_cm = bbox[1] * 100
-        waist_circumference = chest_circumference * 0.85
-        hip_circumference = chest_circumference * 1.0
-
-        return {
-            "chest": round(chest_circumference, 1),
-            "waist": round(waist_circumference, 1),
-            "hip": round(hip_circumference, 1),
-            "height": round(height_cm, 1),
-        }
-
-    def _run_physics_sim(self, body_obj: Path, garment_obj: Path, output_glb: Path, frames: int = 40) -> Path:
-        """Run Blender physics simulation as a subprocess."""
-        blender_path = shutil.which("blender")
-        if not blender_path:
-            raise FileNotFoundError(
-                "Blender not found on PATH. Install Blender 3.6+ and ensure 'blender' is accessible."
-            )
-
-        script_path = Path(__file__).parent / "core" / "physics_sim.py"
-
-        cmd = [
-            blender_path,
-            "--background",
-            "--python", str(script_path),
-            "--",
-            "--body", str(body_obj.resolve()),
-            "--garment", str(garment_obj.resolve()),
-            "--output", str(output_glb.resolve()),
-            "--frames", str(frames),
-        ]
-
-        logger.info("Running Blender: %s", " ".join(cmd))
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-
-        if result.returncode != 0:
-            logger.error("Blender stdout:\n%s", result.stdout)
-            logger.error("Blender stderr:\n%s", result.stderr)
-            raise RuntimeError(
-                f"Blender physics simulation failed (exit code {result.returncode}): "
-                f"{result.stderr[:300]}"
-            )
-
-        logger.info("Blender output:\n%s", result.stdout)
-        return output_glb
+        self.tryon = TryOnWorker(weights_dir)
 
     def run(
         self,
-        user_height_cm: float | None = None,
-        user_weight_kg: float | None = None,
-        garment_photo_path: str | Path | None = None,
-        garment_measurements: dict | None = None,
+        front_photo: str | Path,
+        garment_photos: list[str | Path],
+        category: str = "tops",
+        garment_photo_type: str = "flat-lay",
+        side_photo: str | Path | None = None,
+        back_photo: str | Path | None = None,
+        height_cm: float | None = None,
+        weight_kg: float | None = None,
         fabric: str = "cotton",
     ) -> dict:
         """
-        Execute the full pipeline. Returns sizing result dict.
+        Execute the full VTON pipeline.
 
         Args:
-            user_height_cm: user height in cm (optional but recommended)
-            user_weight_kg: user weight in kg (optional)
-            garment_photo_path: path to garment photo for Garment3DGen
-            garment_measurements: dict with chest_width_cm, body_length_cm, etc.
+            front_photo: path to front-facing full-body photo (person image for VTON front view)
+            garment_photos: list of garment photo paths
+            category: garment category ("tops", "bottoms", "one-pieces")
+            garment_photo_type: "flat-lay" or "model"
+            side_photo: optional side photo for measurements
+            back_photo: optional back photo (person image for VTON back view)
+            height_cm: user height in cm
+            weight_kg: user weight in kg
             fabric: fabric type key
+
+        Returns:
+            dict with sizing result, try-on image paths, feed video path, pipeline log
         """
-        body_obj = self.output_dir / "temp_body.obj"
-        garment_obj = self.output_dir / "temp_garment.obj"
-        final_glb = self.output_dir / "final_fitted_avatar.glb"
+        front_photo = Path(front_photo)
 
-        # Stage 1: Body mesh inference
-        logger.info("=== Stage 1: Body Mesh Inference ===")
-        self.body_inference.generate(self.input_dir, body_obj, height_cm=user_height_cm)
+        # Stage 1: Body measurements
+        logger.info("=== Stage 1: Body Measurements ===")
+        measurements = extract_measurements(
+            front_photo,
+            side_photo=side_photo,
+            height_cm=height_cm,
+            weight_kg=weight_kg,
+            pipeline_log=self.pipeline_log,
+        )
+        logger.info("Measurements: %s", measurements)
 
-        # Stage 2: Garment generation
-        logger.info("=== Stage 2: Garment Generation ===")
-        garment_generated = False
+        # Stage 2: Virtual try-on (front + back per garment)
+        logger.info("=== Stage 2: Virtual Try-On ===")
+        tryon_results = {}  # {garment_idx: {front: path, back: path}}
+        front_tryon_paths = []
 
-        # Try Garment3DGen from photo first
-        if garment_photo_path is not None:
-            photo_path = Path(garment_photo_path)
-            if photo_path.exists():
-                result_path = self.garment_3dgen.generate_from_photo(
-                    photo_path, garment_obj, body_obj
-                )
-                if result_path is not None:
-                    garment_generated = True
-                    logger.info("Garment generated via Garment3DGen from photo")
+        for i, gpath in enumerate(garment_photos):
+            gpath = Path(gpath)
+            if not gpath.exists():
+                logger.warning("Garment photo not found: %s", gpath)
+                continue
 
-        # Try measurement-based parametric if photo failed or not provided
-        if not garment_generated and garment_measurements:
-            self.garment_generator.generate_from_measurements(
-                garment_obj,
-                chest_width_cm=garment_measurements.get("chest_width_cm", 50.0),
-                body_length_cm=garment_measurements.get("body_length_cm", 70.0),
-                sleeve_length_cm=garment_measurements.get("sleeve_length_cm", 20.0),
-                waist_width_cm=garment_measurements.get("waist_width_cm", 48.0),
+            garment_results = {}
+
+            # Front view
+            front_out = self.output_dir / f"tryon_front_{i}.png"
+            front_result = self.tryon.generate(
+                person_path=front_photo,
+                garment_path=gpath,
+                category=category,
+                output_path=front_out,
+                garment_photo_type=garment_photo_type,
+                pipeline_log=self.pipeline_log,
             )
-            garment_generated = True
-            logger.info("Garment generated from explicit measurements")
+            if front_result:
+                garment_results["front"] = str(front_result)
+                front_tryon_paths.append(front_result)
 
-        # Fall back to body-relative parametric
-        if not garment_generated:
-            self.garment_generator.generate(body_obj, garment_obj)
-            logger.info("Garment generated via parametric fallback")
+            # Back view
+            if back_photo and Path(back_photo).exists():
+                back_out = self.output_dir / f"tryon_back_{i}.png"
+                back_result = self.tryon.generate(
+                    person_path=back_photo,
+                    garment_path=gpath,
+                    category=category,
+                    output_path=back_out,
+                    garment_photo_type=garment_photo_type,
+                    pipeline_log=self.pipeline_log,
+                )
+                if back_result:
+                    garment_results["back"] = str(back_result)
 
-        # Stage 3: Physics simulation (requires Blender)
-        logger.info("=== Stage 3: Physics Simulation ===")
-        try:
-            self._run_physics_sim(body_obj, garment_obj, final_glb)
-        except (FileNotFoundError, RuntimeError) as e:
-            log_fallback(logger, "physics_sim", e, self.pipeline_log)
-            logger.info("To complete this stage, install Blender 3.6+ and add to PATH.")
+            tryon_results[i] = garment_results
 
-        # Stage 4: Sizing recommendation
-        logger.info("=== Stage 4: Size Recommendation ===")
-        measurements = self._extract_measurements_from_mesh(body_obj)
-
-        # Blend in user-provided height/weight
-        if user_height_cm is not None:
-            measurements["height_cm"] = user_height_cm
-        if user_weight_kg is not None:
-            measurements["weight_kg"] = user_weight_kg
-
+        # Stage 3: Size recommendation
+        logger.info("=== Stage 3: Size Recommendation ===")
         sizing_result = recommend_size(measurements, fabric=fabric)
-        sizing_result["body_measurements_from_mesh"] = self._extract_measurements_from_mesh(body_obj)
-        sizing_result["pipeline_log"] = self.pipeline_log.to_dicts()
 
-        # Save sizing result
-        sizing_path = self.output_dir / "sizing_result.json"
-        with open(sizing_path, "w") as f:
-            json.dump(sizing_result, f, indent=2)
-        logger.info("Sizing result saved to %s", sizing_path)
-        logger.info("Recommended size: %s (confidence: %s)", sizing_result["recommended_size"], sizing_result["confidence_score"])
+        # Stage 4: Feed video (front views only)
+        logger.info("=== Stage 4: Feed Video ===")
+        feed_path = None
+        if front_tryon_paths:
+            feed_out = self.output_dir / "feed.mp4"
+            feed_path = generate_feed_video(
+                front_tryon_paths, feed_out,
+                pipeline_log=self.pipeline_log,
+            )
 
-        return sizing_result
+        # Assemble result
+        result = {
+            **sizing_result,
+            "body_measurements": measurements,
+            "tryon_results": tryon_results,
+            "feed_video": str(feed_path) if feed_path else None,
+            "pipeline_log": self.pipeline_log.to_dicts(),
+        }
+
+        # Save result
+        result_path = self.output_dir / "sizing_result.json"
+        with open(result_path, "w") as f:
+            json.dump(result, f, indent=2)
+        logger.info("Result saved to %s", result_path)
+        logger.info(
+            "Recommended size: %s (confidence: %s)",
+            result["recommended_size"], result["confidence_score"],
+        )
+
+        return result
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Olvon Physics Test Pipeline")
-    parser.add_argument("--input-dir", default="server/inputs", help="Directory with captured images")
-    parser.add_argument("--output-dir", default="server/outputs", help="Output directory for meshes and results")
-    parser.add_argument("--weights-dir", default="server/assets/weights", help="Directory with model weights")
+    parser = argparse.ArgumentParser(description="Olvon VTON Pipeline")
+    parser.add_argument("--front-photo", required=True, help="Path to front-facing full-body photo")
+    parser.add_argument("--side-photo", default=None, help="Path to side photo (for measurements)")
+    parser.add_argument("--back-photo", default=None, help="Path to back photo (for back view try-on)")
+    parser.add_argument("--garment-photo", action="append", default=[], help="Path to garment photo (repeatable)")
+    parser.add_argument("--category", default="tops", choices=["tops", "bottoms", "one-pieces"], help="Garment category")
+    parser.add_argument("--garment-type", default="flat-lay", choices=["flat-lay", "model"], help="Garment photo type")
     parser.add_argument("--height", type=float, default=None, help="User height in cm")
     parser.add_argument("--weight", type=float, default=None, help="User weight in kg")
-    parser.add_argument("--garment-photo", default=None, help="Path to garment photo for 3D reconstruction")
-    parser.add_argument("--fabric", default="cotton", help="Fabric type (cotton, spandex, polyester, etc.)")
+    parser.add_argument("--fabric", default="cotton", help="Fabric type")
+    parser.add_argument("--output-dir", default="server/outputs", help="Output directory")
+    parser.add_argument("--weights-dir", default="server/lib/fashn-vton/weights", help="VTON weights directory")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-    pipeline = PhysicsTestPipeline(
-        input_dir=args.input_dir,
+    pipeline = VTONPipeline(
         output_dir=args.output_dir,
         weights_dir=args.weights_dir,
     )
     result = pipeline.run(
-        user_height_cm=args.height,
-        user_weight_kg=args.weight,
-        garment_photo_path=args.garment_photo,
+        front_photo=args.front_photo,
+        garment_photos=args.garment_photo,
+        category=args.category,
+        garment_photo_type=args.garment_type,
+        side_photo=args.side_photo,
+        back_photo=args.back_photo,
+        height_cm=args.height,
+        weight_kg=args.weight,
         fabric=args.fabric,
     )
 

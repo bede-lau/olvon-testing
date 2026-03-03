@@ -1,4 +1,4 @@
 torch>=2.0.0
-trimesh>=4.0.0
 numpy>=1.24.0
 Pillow>=10.0.0
+# fashn-vton: installed via setup.sh (pip install -e server/lib/fashn-vton)
