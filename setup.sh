@@ -12,7 +12,7 @@ echo "[2/4] Installing FASHN VTON..."
 if [ -d "server/lib/fashn-vton" ]; then
     echo "  fashn-vton directory already exists."
 else
-    git clone https://github.com/fashn-ai/fashn-vton.git server/lib/fashn-vton
+    git clone https://github.com/fashn-AI/fashn-vton-1.5.git server/lib/fashn-vton
 fi
 pip install -e server/lib/fashn-vton || echo "  fashn-vton install failed. VTON fallback will be used."
 
