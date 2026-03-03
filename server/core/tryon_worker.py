@@ -81,7 +81,7 @@ class TryOnWorker:
             person_img = Image.open(person_path).convert("RGB")
             garment_img = Image.open(garment_path).convert("RGB")
 
-            result_img = self._pipeline(
+            result = self._pipeline(
                 person_image=person_img,
                 garment_image=garment_img,
                 category=category,
@@ -91,7 +91,7 @@ class TryOnWorker:
             )
 
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            result_img.save(str(output_path))
+            result.images[0].save(str(output_path))
             logger.info("Try-on result saved to %s", output_path)
             return output_path
 

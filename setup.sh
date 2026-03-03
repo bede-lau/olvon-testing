@@ -22,11 +22,8 @@ WEIGHTS_DIR="server/lib/fashn-vton/weights"
 if [ -d "$WEIGHTS_DIR" ] && [ "$(ls -A $WEIGHTS_DIR 2>/dev/null)" ]; then
     echo "  Weights already present. Skipping."
 else
-    python -c "
-from fashn_vton import TryOnPipeline
-TryOnPipeline.download_weights('$WEIGHTS_DIR')
-print('  Weights downloaded.')
-" 2>/dev/null || echo "  Weight download failed. VTON fallback will be used."
+    python server/lib/fashn-vton/scripts/download_weights.py --weights-dir "$WEIGHTS_DIR" \
+        || echo "  Weight download failed. VTON fallback will be used."
 fi
 
 # Create directories and check prerequisites
