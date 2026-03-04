@@ -80,6 +80,24 @@ streamlit run visualizer/app.py --server.address=0.0.0.0
 | FASHN VTON v1.5 | Diffusion model (~2 GB) | `server/lib/fashn-vton/weights/` — downloaded via setup.sh |
 | MediaPipe Pose | Task file (~26 MB) | `client/assets/pose_landmarker_heavy.task` — auto-downloaded on first use |
 
+## Vast.ai Deployment Notes
+
+- **Disk:** Rent with 60GB+ disk. The container overlay (default ~16GB) is the only accessible
+  filesystem — the host nvme is NOT mounted inside the container. `/workspace`, `/tmp`, and `/`
+  all share the same overlay.
+- **SSH:** Connect with `ssh -A` (agent forwarding) so `git clone` works without copying keys
+  to the instance. Load key locally first: `eval "$(ssh-agent -s)" && ssh-add ~/.ssh/id_ed25519`.
+- **PyTorch version:** FASHN VTON v1.5 requires PyTorch >= 2.4.0. Default vast.ai images often
+  ship 2.2.x. Upgrade with `--no-cache-dir` to avoid disk exhaustion:
+  `pip uninstall torch torchvision -y && pip install "torch>=2.4.0" torchvision --index-url https://download.pytorch.org/whl/cu126 --no-cache-dir`
+- **CUDA wheels:** Use `cu126` index even on CUDA 13.x — PyTorch CUDA wheels are backward-compatible
+  with newer drivers.
+- **Weight download:** Must run AFTER PyTorch >= 2.4.0 is installed. Uses the script directly:
+  `python server/lib/fashn-vton/scripts/download_weights.py --weights-dir server/lib/fashn-vton/weights`
+  (not a Python API method — `TryOnPipeline.download_weights()` does not exist).
+- **FASHN VTON repo:** `fashn-AI/fashn-vton-1.5` (not `fashn-ai/fashn-vton`).
+- **Result API:** Pipeline returns `result.images[0]` (not a PIL Image directly).
+
 ## Known Gaps
 
 - FASHN VTON requires CUDA GPU (~8GB VRAM) for inference

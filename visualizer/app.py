@@ -150,6 +150,13 @@ class BodyScanProcessor(VideoProcessorBase):
         shoulder_width = abs(l_shoulder.x - r_shoulder.x)
         return nose_vis < 0.5 and shoulder_width > 0.10
 
+    def _check_back_body_visible(self, landmarks) -> bool:
+        """Body visibility for back view — excludes nose (not visible from behind)."""
+        BACK_INDICES = [11, 12, 23, 24, 25, 26, 27, 28]  # shoulders, hips, knees, ankles
+        if landmarks is None or len(landmarks) < 29:
+            return False
+        return all(landmarks[idx].visibility >= 0.5 for idx in BACK_INDICES)
+
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
         self._frame_count += 1
@@ -193,14 +200,13 @@ class BodyScanProcessor(VideoProcessorBase):
                 detect_orientation,
             )
 
-            body_visible = check_full_body_visible(landmarks)
-
             if target == "back":
-                # Back view: check face absence
+                body_visible = self._check_back_body_visible(landmarks)
                 is_back = self._detect_back_view(landmarks)
                 detected = "back" if is_back else detect_orientation(landmarks)
                 orientation_ok = skip or is_back
             else:
+                body_visible = check_full_body_visible(landmarks)
                 detected = detect_orientation(landmarks)
                 # Map "right" or "left" to "side" for our 3-angle system
                 if target == "side" and detected in ("right", "left"):
@@ -516,19 +522,24 @@ def render_step_body_scan():
         ctx.video_processor.target_angle = current_angle
         ctx.video_processor.skip_validation = st.session_state.skip_validation
 
-    if ctx.state.playing and ctx.video_processor:
+    @st.fragment(run_every=0.5)
+    def _capture_poll():
+        """Polls capture queue every 500 ms; advances angle on success."""
+        if not (ctx.state.playing and ctx.video_processor):
+            return
         try:
             angle_name, bgr_img = ctx.video_processor.capture_queue.get_nowait()
             _, png_buf = cv2.imencode(".png", bgr_img)
-            png_bytes = png_buf.tobytes()
-            st.session_state.captured_images[angle_name] = png_bytes
+            st.session_state.captured_images[angle_name] = png_buf.tobytes()
             st.session_state.scan_angle_idx += 1
-
-            st.success(f"Captured {angle_name} view!")
-            time.sleep(0.5)
-            st.rerun()
+            try:
+                st.rerun(scope="app")   # Streamlit >= 1.37
+            except TypeError:
+                st.rerun()              # Streamlit < 1.37
         except queue.Empty:
             pass
+
+    _capture_poll()
 
     if ctx.state.playing and ctx.video_processor:
         if st.button("Capture manually (skip auto-detect)"):
