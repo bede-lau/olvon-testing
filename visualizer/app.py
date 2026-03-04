@@ -35,8 +35,9 @@ DEFAULT_SIZING_PATH = OUTPUT_DIR / "sizing_result.json"
 for d in [OUTPUT_DIR, INPUT_DIR, GARMENT_PHOTO_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-# 3 capture angles (down from 5)
-SCAN_ANGLES = ["front", "side", "back"]
+# Angles to capture — back can be disabled via BACK_SCAN_ENABLED in visualizer/config.py
+from visualizer.config import BACK_SCAN_ENABLED as _BACK_SCAN_ENABLED
+SCAN_ANGLES = ["front", "side", "back"] if _BACK_SCAN_ENABLED else ["front", "side"]
 SCAN_INSTRUCTIONS = {
     "front": "Face the camera directly. Ensure your full body is visible.",
     "side": "Turn so your side faces the camera.",
