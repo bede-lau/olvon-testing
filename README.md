@@ -118,11 +118,13 @@ output images and temp files during inference without paying for unnecessary spa
 
 ### 2. Connect from Your Local Machine
 
-> **[local]** — run this in a terminal on your machine, **not** inside the instance.
+Two terminals are required — one for the SSH session and one for the port tunnel.
+
+**Terminal 1 — main SSH session:**
 
 ```bash
-# [local]
-ssh -A -p <port> root@<host> -L 8501:localhost:8501
+# [local] — terminal 1
+ssh -A -p <port> root@<host>
 ```
 
 | Flag | Purpose |
@@ -130,18 +132,19 @@ ssh -A -p <port> root@<host> -L 8501:localhost:8501
 | `-A` | Forwards your local SSH agent so `git clone` works on the instance |
 | `-p <port>` | The SSH port shown in your vast.ai instance dashboard |
 | `root@<host>` | The IP address shown in your vast.ai instance dashboard |
-| `-L 8501:localhost:8501` | Tunnels port 8501 so `http://localhost:8501` in your browser reaches Streamlit |
 
-> **Common mistake:** Do not run this command from inside the vast.ai terminal — that
-> SSHes the instance into itself and hangs. Always run it from your local machine.
+**Terminal 2 — port tunnel (open this after starting Streamlit in terminal 1):**
 
-> **If you forgot `-L 8501:localhost:8501`** when connecting, open a second local terminal
-> and run a port-forward-only tunnel without disconnecting your main session:
-> ```bash
-> # [local] — second terminal
-> ssh -N -L 8501:localhost:8501 -p <port> root@<host>
-> ```
-> Leave this terminal open while you use the app.
+```bash
+# [local] — terminal 2
+ssh -N -L 8501:localhost:8501 -p <port> root@<host>
+```
+
+Leave terminal 2 running the entire time you use the app. `http://localhost:8501` in your
+browser will only work while this tunnel is active.
+
+> **Common mistake:** Do not run either SSH command from inside the vast.ai terminal — that
+> SSHes the instance into itself and hangs. Always run them from your local machine.
 
 ---
 
@@ -238,8 +241,15 @@ ls server/lib/fashn-vton/weights/
 streamlit run visualizer/app.py
 ```
 
-Then open **`http://localhost:8501`** in your browser (on your local machine). The tunnel
-from step 2 makes this work.
+Then open a second local terminal and start the port tunnel (if not already running):
+
+```bash
+# [local] — terminal 2
+ssh -N -L 8501:localhost:8501 -p <port> root@<host>
+```
+
+Then open **`http://localhost:8501`** in your browser. The tunnel must stay open the entire
+time you use the app — do not close terminal 2.
 
 The wizard has 4 steps:
 
@@ -315,12 +325,13 @@ Your SSH agent is not forwarded. On your local machine: `ssh-add ~/.ssh/id_ed255
 reconnect with `ssh -A ...`.
 
 **`localhost refused to connect` in browser**
-The port tunnel was not set up. Either reconnect with `-L 8501:localhost:8501`, or open a
-second local terminal and run:
+The port tunnel is not running. Open a second local terminal and run:
 ```bash
-# [local]
+# [local] — terminal 2
 ssh -N -L 8501:localhost:8501 -p <port> root@<host>
 ```
+Leave it running. The `-L` flag in the main SSH connection alone is not reliable — always
+use this dedicated tunnel terminal.
 
 **SSH command hangs after running it inside the instance**
 You ran the `ssh` command from the vast.ai terminal instead of your local machine. Press

@@ -97,6 +97,7 @@ streamlit run visualizer/app.py --server.address=0.0.0.0
   (not a Python API method — `TryOnPipeline.download_weights()` does not exist).
 - **FASHN VTON repo:** `fashn-AI/fashn-vton-1.5` (not `fashn-ai/fashn-vton`).
 - **Result API:** Pipeline returns `result.images[0]` (not a PIL Image directly).
+- **Call API:** Pipeline accepts only `person_image`, `garment_image`, `category`, `garment_photo_type`. Parameters `num_inference_steps` and `seed` are **not valid** and will raise `TypeError`.
 
 ## Known Gaps
 

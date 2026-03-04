@@ -43,8 +43,6 @@ class TryOnWorker:
         category: str,
         output_path: str | Path,
         garment_photo_type: str = "flat-lay",
-        num_timesteps: int = 30,
-        seed: int = 42,
         pipeline_log: PipelineLog | None = None,
     ) -> Path | None:
         """
@@ -56,8 +54,6 @@ class TryOnWorker:
             category: garment category ("tops", "bottoms", "one-pieces")
             output_path: where to save the result image
             garment_photo_type: "flat-lay" or "model"
-            num_timesteps: diffusion steps (lower = faster, less quality)
-            seed: random seed for reproducibility
             pipeline_log: optional structured log collector
 
         Returns:
@@ -86,8 +82,6 @@ class TryOnWorker:
                 garment_image=garment_img,
                 category=category,
                 garment_photo_type=garment_photo_type,
-                num_inference_steps=num_timesteps,
-                seed=seed,
             )
 
             output_path.parent.mkdir(parents=True, exist_ok=True)
