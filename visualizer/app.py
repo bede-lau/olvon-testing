@@ -469,8 +469,15 @@ def render_step_body_scan():
             with thumb_cols[i]:
                 if angle in captured:
                     st.image(captured[angle], caption=angle, width=160)
+                    st.download_button(
+                        label="⬇ Download",
+                        data=captured[angle],
+                        file_name=f"capture_{angle}.png",
+                        mime="image/png",
+                        key=f"dl_{angle}",
+                    )
                 else:
-                    st.markdown(f"*{angle}*")
+                    st.markdown(f"*{angle} — not yet captured*")
 
     if angle_idx >= len(SCAN_ANGLES):
         st.success(f"All {len(SCAN_ANGLES)} angles captured!")
@@ -501,51 +508,74 @@ def render_step_body_scan():
         help="Enable if auto-detection isn't working.",
     )
 
-    ctx = webrtc_streamer(
-        key="body_scan",
-        mode=WebRtcMode.SENDRECV,
-        video_processor_factory=BodyScanProcessor,
-        media_stream_constraints={
-            "video": {
-                "width": {"ideal": 1280},
-                "height": {"ideal": 720},
-                "facingMode": "user",
+    tab_cam, tab_upload = st.tabs(["📷 Webcam Capture", "📁 Upload Photo"])
+
+    with tab_cam:
+        ctx = webrtc_streamer(
+            key="body_scan",
+            mode=WebRtcMode.SENDRECV,
+            video_processor_factory=BodyScanProcessor,
+            media_stream_constraints={
+                "video": {
+                    "width": {"ideal": 1280},
+                    "height": {"ideal": 720},
+                    "facingMode": "user",
+                },
+                "audio": False,
             },
-            "audio": False,
-        },
-        rtc_configuration={
-            "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
-        },
-        async_processing=True,
-    )
+            rtc_configuration={
+                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+            },
+            async_processing=True,
+        )
 
-    if ctx.video_processor:
-        ctx.video_processor.target_angle = current_angle
-        ctx.video_processor.skip_validation = st.session_state.skip_validation
+        if ctx.video_processor:
+            ctx.video_processor.target_angle = current_angle
+            ctx.video_processor.skip_validation = st.session_state.skip_validation
 
-    @st.fragment(run_every=0.5)
-    def _capture_poll():
-        """Polls capture queue every 500 ms; advances angle on success."""
-        if not (ctx.state.playing and ctx.video_processor):
-            return
-        try:
-            angle_name, bgr_img = ctx.video_processor.capture_queue.get_nowait()
-            _, png_buf = cv2.imencode(".png", bgr_img)
-            st.session_state.captured_images[angle_name] = png_buf.tobytes()
-            st.session_state.scan_angle_idx += 1
+        @st.fragment(run_every=0.5)
+        def _capture_poll():
+            """Polls capture queue every 500 ms; advances angle on success."""
+            if not (ctx.state.playing and ctx.video_processor):
+                return
             try:
-                st.rerun(scope="app")   # Streamlit >= 1.37
-            except TypeError:
-                st.rerun()              # Streamlit < 1.37
-        except queue.Empty:
-            pass
+                angle_name, bgr_img = ctx.video_processor.capture_queue.get_nowait()
+                _, png_buf = cv2.imencode(".png", bgr_img)
+                st.session_state.captured_images[angle_name] = png_buf.tobytes()
+                st.session_state.scan_angle_idx += 1
+                try:
+                    st.rerun(scope="app")   # Streamlit >= 1.37
+                except TypeError:
+                    st.rerun()              # Streamlit < 1.37
+            except queue.Empty:
+                pass
 
-    _capture_poll()
+        _capture_poll()
 
-    if ctx.state.playing and ctx.video_processor:
-        if st.button("Capture manually (skip auto-detect)"):
-            ctx.video_processor.skip_validation = True
-            st.markdown("*Manual capture: hold still...*")
+        if ctx.state.playing and ctx.video_processor:
+            if st.button("Capture manually (skip auto-detect)"):
+                ctx.video_processor.skip_validation = True
+                st.markdown("*Manual capture: hold still...*")
+
+    with tab_upload:
+        up = st.file_uploader(
+            f"Upload {current_angle} photo (JPG or PNG)",
+            type=["jpg", "jpeg", "png"],
+            key=f"upload_{current_angle}",
+            help="Full-body photo in correct orientation.",
+        )
+        if up:
+            img_bytes = up.read()
+            arr = np.frombuffer(img_bytes, dtype=np.uint8)
+            decoded = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if decoded is not None:
+                _, png_buf = cv2.imencode(".png", decoded)
+                st.session_state.captured_images[current_angle] = png_buf.tobytes()
+                st.session_state.scan_angle_idx += 1
+                st.success(f"{current_angle.title()} photo uploaded.")
+                st.rerun()
+            else:
+                st.error("Could not decode image. Try a different file.")
 
     st.markdown("---")
     if st.button("Previous: Body Input"):
@@ -556,6 +586,14 @@ def render_step_body_scan():
 def render_step_garment_input():
     st.header("Step 3: Garment Input")
     st.markdown("Upload one or more garment photos, select category, and run the pipeline.")
+
+    st.info(
+        "**Tips for best try-on results:**\n"
+        "- Use garment photos with a **contrasting background** (avoid white shirt on white background — "
+        "low contrast causes segmentation to fail).\n"
+        "- Wear a **fitted base garment** during scanning — being shirtless can reduce try-on accuracy.\n"
+        "- Ensure your **full head and face are visible** in the scan — partial head crop reduces pose accuracy."
+    )
 
     garment_files = st.file_uploader(
         "Upload garment photos", type=["jpg", "jpeg", "png"],

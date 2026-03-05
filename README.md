@@ -293,14 +293,83 @@ python -m server.main_pipeline \
 
 ## Model Weights
 
-| Model | Size | Location |
-|-------|------|----------|
-| FASHN VTON v1.5 | ~2 GB | `server/lib/fashn-vton/weights/` (downloaded by setup.sh) |
-| MediaPipe Pose | ~26 MB | `client/assets/` (auto-downloaded on first use) |
+| Model | Size | Location / Install | License |
+|-------|------|--------------------|---------|
+| FASHN VTON v1.5 | ~2 GB | `server/lib/fashn-vton/weights/` — downloaded via `setup.sh` | Apache 2.0 |
+| MediaPipe Pose | ~26 MB | `client/assets/pose_landmarker_heavy.task` — auto-downloaded on first use | Apache 2.0 |
+| RealESRGAN_x4plus | ~67 MB | `~/.cache/realesrgan/` — downloaded on first use by `person_enhancer.py` | BSD 3-Clause |
+| BiRefNet-portrait | ~168 MB | `~/.u2net/` — downloaded on first use by `rembg` | Apache 2.0 |
 
-### FASHN VTON License
+### Person Enhancement Pipeline
 
-FASHN VTON v1.5 is licensed under Apache 2.0. See [fashn-AI/fashn-vton-1.5](https://github.com/fashn-AI/fashn-vton-1.5) for details.
+`server/core/person_enhancer.py` runs two models sequentially before FASHN VTON inference:
+
+1. **Real-ESRGAN x4plus** — 4× upscale of the webcam photo (identity-preserving, no face hallucination)
+2. **BiRefNet-portrait** — background removal to a clean white canvas
+
+VRAM usage is sequential (models unloaded between steps):
+
+| Step | Model | VRAM peak | Duration |
+|------|-------|-----------|---------|
+| Real-ESRGAN 4× | realesrgan-x4plus | ~2 GB | ~2 s |
+| BiRefNet cutout | birefnet-portrait | ~1.5 GB | ~1 s |
+| FASHN VTON | diffusion model | ~8 GB | ~30–60 s |
+| **Peak (FASHN VTON)** | | **~8 GB** | |
+
+Both stages fall back gracefully if the libraries are unavailable.
+
+---
+
+## Third-Party Licenses
+
+### FASHN VTON v1.5
+
+Licensed under Apache 2.0. See [fashn-AI/fashn-vton-1.5](https://github.com/fashn-AI/fashn-vton-1.5).
+
+### Real-ESRGAN
+
+Used in `server/core/person_enhancer.py` for 4× person photo upscaling.
+Source: [xinntao/Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)
+
+**BSD 3-Clause License**
+
+```
+Copyright (c) 2021, xinntao
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+> **For binary/app distribution:** this copyright notice and the three conditions
+> above must be reproduced in the app's documentation or About section.
+
+### BiRefNet-portrait
+
+Used in `server/core/person_enhancer.py` via `rembg` for background removal.
+Source: [ZhengPeng7/BiRefNet](https://github.com/ZhengPeng7/BiRefNet) — licensed under Apache 2.0.
 
 ---
 

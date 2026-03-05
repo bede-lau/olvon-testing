@@ -46,7 +46,7 @@ def build_ffmpeg_cmd(
     if n == 1:
         # Single image → simple video
         cmd += [
-            "-vf", "scale=1080:1440:force_original_aspect_ratio=decrease,pad=1080:1440:(ow-iw)/2:(oh-ih)/2",
+            "-vf", "scale=1080:1440:force_original_aspect_ratio=decrease,pad=1080:1440:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
             "-t", str(duration),
             str(output_path),
@@ -59,7 +59,7 @@ def build_ffmpeg_cmd(
     for i in range(n):
         filter_parts.append(
             f"[{i}:v]scale=1080:1440:force_original_aspect_ratio=decrease,"
-            f"pad=1080:1440:(ow-iw)/2:(oh-ih)/2,setsar=1[v{i}]"
+            f"pad=1080:1440:(ow-iw)/2:(oh-ih)/2,format=yuv420p,setsar=1[v{i}]"
         )
 
     # Chain crossfades
@@ -128,7 +128,7 @@ def generate_feed_video(
             cmd, capture_output=True, text=True, timeout=120,
         )
         if result.returncode != 0:
-            logger.error("FFmpeg stderr: %s", result.stderr[:500])
+            logger.error("FFmpeg stderr:\n%s", result.stderr)
             log_fallback(
                 logger, "feed_video",
                 RuntimeError(f"FFmpeg failed (exit {result.returncode})"),

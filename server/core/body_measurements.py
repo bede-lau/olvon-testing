@@ -34,13 +34,14 @@ LEFT_ANKLE = 27
 RIGHT_ANKLE = 28
 
 # Circumference conversion factors (width * pi * factor)
-CHEST_FACTOR = 1.1   # shoulders/chest are not circular, slight correction
-HIP_FACTOR = 1.05
-WAIST_RATIO = 0.85   # waist ≈ 85% of chest circumference
+CHEST_FACTOR = 0.75        # biacromial → chest circumference (empirical, not circular)
+HIP_FACTOR = 0.86          # MediaPipe hip joint landmark → hip circumference
+WAIST_RATIO = 0.85         # waist ≈ 85% of chest circumference
+NOSE_TO_ANKLE_RATIO = 0.92 # nose-to-ankle ≈ 92% of total body height
 
 
 def _extract_from_landmarks(
-    landmarks, image_height: int, height_cm: float | None,
+    landmarks, image_height: int, image_width: int, height_cm: float | None,
 ) -> dict | None:
     """
     Extract body measurements from MediaPipe pose landmarks.
@@ -79,23 +80,23 @@ def _extract_from_landmarks(
     hip_width_norm = abs(l_hip.x - r_hip.x)
 
     if height_cm and height_cm > 0:
-        # Nose-to-ankle ≈ 85% of total height
-        estimated_body_height_px = nose_to_ankle_px / 0.85
+        # Nose-to-ankle ≈ NOSE_TO_ANKLE_RATIO of total height
+        estimated_body_height_px = nose_to_ankle_px / NOSE_TO_ANKLE_RATIO
         px_to_cm = height_cm / estimated_body_height_px
 
-        shoulder_width_cm = shoulder_width_norm * image_height * px_to_cm
-        hip_width_cm = hip_width_norm * image_height * px_to_cm
+        shoulder_width_cm = shoulder_width_norm * image_width * px_to_cm
+        hip_width_cm = hip_width_norm * image_width * px_to_cm
     else:
         # Without height, use anthropometric ratios:
         # shoulder width ≈ 25% of height, so we estimate from proportions
-        # nose-to-ankle ≈ 85% height → height_estimate = nose_to_ankle / 0.85
+        # nose-to-ankle ≈ NOSE_TO_ANKLE_RATIO height → height_estimate = nose_to_ankle / ratio
         # shoulder_ratio = shoulder_px / nose_to_ankle_px
-        shoulder_ratio = shoulder_width_norm * image_height / nose_to_ankle_px
-        hip_ratio = hip_width_norm * image_height / nose_to_ankle_px
+        shoulder_ratio = shoulder_width_norm * image_width / nose_to_ankle_px
+        hip_ratio = hip_width_norm * image_width / nose_to_ankle_px
 
         # Average height assumption: 170cm
         assumed_height = 170.0
-        estimated_body_px = nose_to_ankle_px / 0.85
+        estimated_body_px = nose_to_ankle_px / NOSE_TO_ANKLE_RATIO
         px_to_cm = assumed_height / estimated_body_px
 
         shoulder_width_cm = shoulder_ratio * nose_to_ankle_px * px_to_cm
@@ -172,7 +173,7 @@ def extract(
 
                     if detection.pose_landmarks and len(detection.pose_landmarks) > 0:
                         landmarks = detection.pose_landmarks[0]
-                        result = _extract_from_landmarks(landmarks, h, height_cm)
+                        result = _extract_from_landmarks(landmarks, h, w, height_cm)
                         if result:
                             logger.info("Body measurements extracted from landmarks")
                 finally:

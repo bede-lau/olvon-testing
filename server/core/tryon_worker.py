@@ -73,8 +73,10 @@ class TryOnWorker:
 
         try:
             from PIL import Image
+            from server.core.person_enhancer import prepare_person_for_vton
 
             person_img = Image.open(person_path).convert("RGB")
+            person_img = prepare_person_for_vton(person_img)
             garment_img = Image.open(garment_path).convert("RGB")
 
             result = self._pipeline(

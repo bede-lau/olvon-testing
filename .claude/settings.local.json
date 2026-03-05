@@ -30,7 +30,9 @@
       "WebFetch(domain:arxiv.org)",
       "WebFetch(domain:fashn.ai)",
       "WebFetch(domain:pmc.ncbi.nlm.nih.gov)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "mcp__claude_ai_Hugging_Face__hub_repo_search",
+      "mcp__claude_ai_Hugging_Face__paper_search"
     ]
   }
 }

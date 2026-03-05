@@ -75,10 +75,16 @@ streamlit run visualizer/app.py --server.address=0.0.0.0
 
 ## Model Weights
 
-| Model | Type | Location / Install |
-|-------|------|--------------------|
-| FASHN VTON v1.5 | Diffusion model (~2 GB) | `server/lib/fashn-vton/weights/` — downloaded via setup.sh |
-| MediaPipe Pose | Task file (~26 MB) | `client/assets/pose_landmarker_heavy.task` — auto-downloaded on first use |
+| Model | Type | Location / Install | License |
+|-------|------|--------------------|---------|
+| FASHN VTON v1.5 | Diffusion model (~2 GB) | `server/lib/fashn-vton/weights/` — downloaded via setup.sh | Apache 2.0 |
+| MediaPipe Pose | Task file (~26 MB) | `client/assets/pose_landmarker_heavy.task` — auto-downloaded on first use | Apache 2.0 |
+| RealESRGAN_x4plus | Upscaler (~67 MB) | `~/.cache/realesrgan/` — auto-downloaded on first use | **BSD 3-Clause** |
+| BiRefNet-portrait | Segmentation (~168 MB) | `~/.u2net/` — auto-downloaded by rembg on first use | Apache 2.0 |
+
+**Real-ESRGAN BSD 3-Clause requirement:** When distributing an app, reproduce the copyright notice
+(`Copyright (c) 2021, xinntao`) and the three BSD conditions in the documentation or About section.
+Full license text is in `README.md` under "Third-Party Licenses".
 
 ## Vast.ai Deployment Notes
 
