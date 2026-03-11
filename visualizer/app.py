@@ -716,17 +716,22 @@ def render_step_results():
         _tw_version = f"V2={server.core.tryon_worker.TRYON_WORKER_V2}"
     except Exception as _e:
         _tw_version = f"OLD({_e})"
-    import time
+    import time, sys
     _ts = st.session_state.get("_pipeline_ts", 0)
     _age = round(time.time() - _ts) if _ts else "never"
+    try:
+        import fashn_vton
+        _fv = f"OK({fashn_vton.__file__})"
+    except ImportError as _ie:
+        _fv = f"FAIL({_ie})"
     st.warning(
         f"DEBUG: data_source={'session_state' if _from_session else 'file'}, "
         f"pipeline_ran={st.session_state.get('pipeline_ran')}, "
         f"tryon_worker={_tw_version}, "
+        f"fashn_vton={_fv}, "
+        f"python={sys.executable}, "
         f"pipeline_age={_age}s, "
-        f"pipeline_log_entries={len(_plog)}, "
-        f"tryon_results={_tryon}, "
-        f"garment_paths={_garments}"
+        f"pipeline_log_entries={len(_plog)}"
     )
     if _plog:
         st.error(f"DEBUG full pipeline_log: {_plog}")
