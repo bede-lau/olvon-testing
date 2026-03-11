@@ -707,9 +707,15 @@ def render_step_results():
     _plog = sizing_data.get("pipeline_log", []) if sizing_data else []
     _tryon = sizing_data.get("tryon_results", {}) if sizing_data else {}
     _garments = st.session_state.get("garment_paths", [])
+    try:
+        from server.core.tryon_worker import TRYON_WORKER_V2
+        _tw_version = "V2"
+    except ImportError:
+        _tw_version = "V1-OLD"
     st.warning(
         f"DEBUG: data_source={'session_state' if _from_session else 'file'}, "
         f"pipeline_ran={st.session_state.get('pipeline_ran')}, "
+        f"tryon_worker={_tw_version}, "
         f"pipeline_log_entries={len(_plog)}, "
         f"tryon_results={_tryon}, "
         f"garment_paths={_garments}"

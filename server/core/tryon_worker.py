@@ -12,6 +12,9 @@ from server.core.diagnostics import PipelineLog, log_fallback
 
 logger = logging.getLogger(__name__)
 
+# Debug marker — if this module is loaded, this will be True
+TRYON_WORKER_V2 = True
+
 
 class TryOnWorker:
     """Wraps fashn_vton.TryOnPipeline for 2D virtual try-on inference."""
@@ -23,25 +26,17 @@ class TryOnWorker:
 
     def _try_load_pipeline(self) -> bool:
         """Attempt to load the FASHN VTON pipeline. Returns True on success."""
-        import datetime
-        _dbg = open("/tmp/vton_debug.log", "a")
-        _dbg.write(f"\n[{datetime.datetime.now()}] _try_load_pipeline called\n")
         if self._available is not None:
-            _dbg.write(f"  cached: _available={self._available}\n")
-            _dbg.close()
             return self._available
-        _dbg.write(f"  weights_dir={self.weights_dir}\n")
         try:
             from fashn_vton import TryOnPipeline
 
             self._pipeline = TryOnPipeline(str(self.weights_dir))
             self._available = True
-            _dbg.write("  SUCCESS: pipeline loaded\n")
             logger.info("FASHN VTON pipeline loaded from %s", self.weights_dir)
         except ImportError as e:
             self._available = False
             self._load_error = str(e)
-            _dbg.write(f"  FAIL ImportError: {e}\n")
             logger.error(
                 "FASHN VTON import failed (is fashn-vton installed? "
                 "Run: pip install -e server/lib/fashn-vton): %s", e,
@@ -49,9 +44,7 @@ class TryOnWorker:
         except Exception as e:
             self._available = False
             self._load_error = str(e)
-            _dbg.write(f"  FAIL {type(e).__name__}: {e}\n")
             logger.error("FASHN VTON pipeline failed to load: %s", e)
-        _dbg.close()
         return self._available
 
     def generate(
@@ -81,16 +74,11 @@ class TryOnWorker:
         garment_path = Path(garment_path)
         output_path = Path(output_path)
 
-        import datetime
-        with open("/tmp/vton_debug.log", "a") as _dbg:
-            _dbg.write(f"\n[{datetime.datetime.now()}] generate() called\n")
-            _dbg.write(f"  person={person_path}, garment={garment_path}\n")
-
         if not self._try_load_pipeline():
             reason = getattr(self, "_load_error", "unknown")
             log_fallback(
                 logger, "tryon",
-                RuntimeError(f"FASHN VTON pipeline not available: {reason}"),
+                RuntimeError(f"VTON_V2_LOAD_FAILED reason=[{reason}]"),
                 pipeline_log,
             )
             return None
