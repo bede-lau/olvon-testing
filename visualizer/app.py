@@ -870,6 +870,7 @@ STEP_RENDERERS = [
 def main():
     init_session()
     st.title("Olvon VTON")
+    st.caption("Build: 2026-03-12-debug")
     render_step_indicator()
     step = st.session_state.step
     if 0 <= step < len(STEP_RENDERERS):
