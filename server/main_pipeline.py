@@ -13,6 +13,9 @@ from server.core.body_measurements import extract as extract_measurements
 from server.core.diagnostics import PipelineLog
 from server.core.feed_generator import generate_feed_video
 from server.core.sizing_logic import recommend_size
+import importlib
+import server.core.tryon_worker
+importlib.reload(server.core.tryon_worker)
 from server.core.tryon_worker import TryOnWorker
 
 logger = logging.getLogger(__name__)
