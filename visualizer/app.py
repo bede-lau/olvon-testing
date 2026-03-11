@@ -395,10 +395,15 @@ def run_pipeline(
     garment_paths, category, garment_photo_type,
     height_cm, weight_kg, fabric,
 ):
+    import datetime
+    with open("/tmp/vton_debug.log", "a") as f:
+        f.write(f"\n[{datetime.datetime.now()}] run_pipeline() called\n")
+        f.write(f"  garment_paths={garment_paths}\n")
+        f.write(f"  front={front_photo_path}\n")
     from server.main_pipeline import VTONPipeline
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     pipeline = VTONPipeline()
-    return pipeline.run(
+    result = pipeline.run(
         front_photo=front_photo_path,
         garment_photos=garment_paths,
         category=category,
@@ -409,6 +414,10 @@ def run_pipeline(
         weight_kg=weight_kg if weight_kg and weight_kg > 0 else None,
         fabric=fabric,
     )
+    with open("/tmp/vton_debug.log", "a") as f:
+        f.write(f"  pipeline returned, pipeline_log={result.get('pipeline_log')}\n")
+        f.write(f"  tryon_results={result.get('tryon_results')}\n")
+    return result
 
 
 def run_single_tryon(person_path, garment_path, category, garment_photo_type, output_path):
@@ -692,8 +701,15 @@ def render_step_results():
     st.header("Step 4: Results")
 
     sizing_data = st.session_state.get("sizing_result")
+    import datetime
+    with open("/tmp/vton_debug.log", "a") as f:
+        f.write(f"\n[{datetime.datetime.now()}] render_step_results()\n")
+        f.write(f"  session_state sizing_result is None: {sizing_data is None}\n")
+        f.write(f"  sizing_result.json exists: {DEFAULT_SIZING_PATH.exists()}\n")
     if sizing_data is None and DEFAULT_SIZING_PATH.exists():
         sizing_data = json.loads(DEFAULT_SIZING_PATH.read_text())
+        with open("/tmp/vton_debug.log", "a") as f:
+            f.write(f"  LOADED FROM FILE: pipeline_log={sizing_data.get('pipeline_log')}\n")
 
     if not sizing_data:
         st.info("No results yet. Run the pipeline first.")

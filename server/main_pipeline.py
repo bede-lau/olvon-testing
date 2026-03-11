@@ -126,6 +126,10 @@ class VTONPipeline:
 
         # Stage 2: Virtual try-on (front + back per garment)
         logger.info("=== Stage 2: Virtual Try-On ===")
+        import datetime
+        with open("/tmp/vton_debug.log", "a") as _dbg:
+            _dbg.write(f"\n[{datetime.datetime.now()}] Stage 2: garment_photos={garment_photos}\n")
+            _dbg.write(f"  person_for_tryon={person_for_tryon}\n")
         tryon_results = {}  # {garment_idx: {front: path, back: path}}
         front_tryon_paths = []
 
