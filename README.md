@@ -163,6 +163,10 @@ ssh -N -L 8501:localhost:8501 -p <port> root@<host>
 Leave terminal 2 running the entire time you use the app. `http://localhost:8501` in your
 browser will only work while this tunnel is active.
 
+> **Verify the connection:** After SSHing into the instance (Terminal 1), run `ssh-add -l`. 
+> If it returns "The agent has no identities" or an error, exit and run `ssh-add ~/.ssh/id_ed25519` 
+> on your local machine before reconnecting with `-A`.
+
 > **Common mistake:** Do not run either SSH command from inside the vast.ai terminal — that
 > SSHes the instance into itself and hangs. Always run them from your local machine.
 
@@ -197,19 +201,18 @@ bash setup.sh
 
 ---
 
-### 5. Upgrade PyTorch to >= 2.4.0
+### 5. Verify PyTorch + torchvision
 
-> **[vast.ai]** — FASHN VTON v1.5 requires PyTorch >= 2.4.0. Default vast.ai images
-> often ship 2.2.x which will cause the weight download to fail.
-
-Check the installed version first:
+> **[vast.ai]** — `setup.sh` automatically checks PyTorch >= 2.4.0 and torchvision
+> compatibility, upgrading both if needed. This step is just to verify.
 
 ```bash
 # [vast.ai]
-python -c "import torch; print(torch.__version__)"
+python -c "import torch, torchvision; print(torch.__version__, torchvision.__version__, torch.cuda.is_available())"
+# Expected: 2.x.x 0.x.x True
 ```
 
-If it is below 2.4.0:
+If either version looks wrong or CUDA shows `False`, reinstall manually:
 
 ```bash
 # [vast.ai]
@@ -223,13 +226,9 @@ pip install "torch>=2.4.0" torchvision --index-url https://download.pytorch.org/
 > **CUDA version:** Use the `cu126` index even on CUDA 13.x — PyTorch CUDA wheels are
 > backward-compatible with newer drivers.
 
-Verify GPU is detected:
-
-```bash
-# [vast.ai]
-python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
-# Expected: 2.x.x True
-```
+> **PyTorch + torchvision must be installed together.** Installing only one causes an ABI
+> mismatch (`operator torchvision::nms does not exist`). Always uninstall both before
+> reinstalling.
 
 ---
 
@@ -279,7 +278,6 @@ The wizard has 4 steps:
 4. **Results** — Two tabs:
    - **Feed Video** — Short-form try-on slideshow video
    - **Virtual Dressing Room** — Flip between front/back views, click garments to try on
-
 ---
 
 ### 8. Clean Up
@@ -406,8 +404,14 @@ command building.
 ## Troubleshooting
 
 **`Permission denied (publickey)` when cloning**
-Your SSH agent is not forwarded. On your local machine: `ssh-add ~/.ssh/id_ed25519`, then
-reconnect with `ssh -A ...`.
+This happens when the server cannot access your local SSH key. To fix:
+1. **Local machine**: Ensure agent is running and key is loaded:
+   `eval "$(ssh-agent -s)"` followed by `ssh-add ~/.ssh/id_ed25519`. 
+   Verify with `ssh-add -l`.
+2. **Reconnect**: Connect to the instance using the `-A` flag:
+   `ssh -A -p <port> root@<host>`.
+3. **Instance**: Verify the key is forwarded by running `ssh-add -l` on the server.
+   It should list your key's fingerprint. Then try cloning again.
 
 **`localhost refused to connect` in browser**
 The port tunnel is not running. Open a second local terminal and run:

@@ -107,9 +107,10 @@ Full license text is in `README.md` under "Third-Party Licenses".
   all share the same overlay.
 - **SSH:** Connect with `ssh -A` (agent forwarding) so `git clone` works without copying keys
   to the instance. Load key locally first: `eval "$(ssh-agent -s)" && ssh-add ~/.ssh/id_ed25519`.
-- **PyTorch version:** FASHN VTON v1.5 requires PyTorch >= 2.4.0. Default vast.ai images often
-  ship 2.2.x. Upgrade with `--no-cache-dir` to avoid disk exhaustion:
-  `pip uninstall torch torchvision -y && pip install "torch>=2.4.0" torchvision --index-url https://download.pytorch.org/whl/cu126 --no-cache-dir`
+- **PyTorch version:** FASHN VTON v1.5 requires PyTorch >= 2.4.0. `setup.sh` auto-detects and
+  upgrades if needed. If manual install is required, **always install torch and torchvision
+  together** — mismatched versions cause `operator torchvision::nms does not exist` at import:
+  `pip uninstall torch torchvision torchaudio -y && pip install "torch>=2.4.0" torchvision --index-url https://download.pytorch.org/whl/cu126 --no-cache-dir`
 - **CUDA wheels:** Use `cu126` index even on CUDA 13.x — PyTorch CUDA wheels are backward-compatible
   with newer drivers.
 - **Weight download:** Must run AFTER PyTorch >= 2.4.0 is installed. Uses the script directly:

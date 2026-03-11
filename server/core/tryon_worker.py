@@ -31,9 +31,17 @@ class TryOnWorker:
             self._pipeline = TryOnPipeline(str(self.weights_dir))
             self._available = True
             logger.info("FASHN VTON pipeline loaded from %s", self.weights_dir)
+        except ImportError as e:
+            self._available = False
+            self._load_error = str(e)
+            logger.error(
+                "FASHN VTON import failed (is fashn-vton installed? "
+                "Run: pip install -e server/lib/fashn-vton): %s", e,
+            )
         except Exception as e:
             self._available = False
-            logger.warning("FASHN VTON unavailable: %s", e)
+            self._load_error = str(e)
+            logger.error("FASHN VTON pipeline failed to load: %s", e)
         return self._available
 
     def generate(
@@ -64,9 +72,10 @@ class TryOnWorker:
         output_path = Path(output_path)
 
         if not self._try_load_pipeline():
+            reason = getattr(self, "_load_error", "unknown")
             log_fallback(
                 logger, "tryon",
-                RuntimeError("FASHN VTON pipeline not available"),
+                RuntimeError(f"FASHN VTON pipeline not available: {reason}"),
                 pipeline_log,
             )
             return None

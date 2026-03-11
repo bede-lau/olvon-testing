@@ -541,24 +541,25 @@ def render_step_body_scan():
             ctx.video_processor.target_angle = current_angle
             ctx.video_processor.skip_validation = st.session_state.skip_validation
 
-        @st.fragment(run_every=0.5)
-        def _capture_poll():
-            """Polls capture queue every 500 ms; advances angle on success."""
-            if not (ctx.state.playing and ctx.video_processor):
-                return
-            try:
-                angle_name, bgr_img = ctx.video_processor.capture_queue.get_nowait()
-                _, png_buf = cv2.imencode(".png", bgr_img)
-                st.session_state.captured_images[angle_name] = png_buf.tobytes()
-                st.session_state.scan_angle_idx += 1
+        if ctx.state.playing and ctx.video_processor:
+            @st.fragment(run_every=0.5)
+            def _capture_poll():
+                """Polls capture queue every 500 ms; advances angle on success."""
+                if not (ctx.state.playing and ctx.video_processor):
+                    return
                 try:
-                    st.rerun(scope="app")   # Streamlit >= 1.37
-                except TypeError:
-                    st.rerun()              # Streamlit < 1.37
-            except queue.Empty:
-                pass
+                    angle_name, bgr_img = ctx.video_processor.capture_queue.get_nowait()
+                    _, png_buf = cv2.imencode(".png", bgr_img)
+                    st.session_state.captured_images[angle_name] = png_buf.tobytes()
+                    st.session_state.scan_angle_idx += 1
+                    try:
+                        st.rerun(scope="app")   # Streamlit >= 1.37
+                    except TypeError:
+                        st.rerun()              # Streamlit < 1.37
+                except queue.Empty:
+                    pass
 
-        _capture_poll()
+            _capture_poll()
 
         if ctx.state.playing and ctx.video_processor:
             if st.button("Capture manually (skip auto-detect)"):
