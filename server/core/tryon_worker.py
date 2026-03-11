@@ -24,16 +24,20 @@ class TryOnWorker:
     def _try_load_pipeline(self) -> bool:
         """Attempt to load the FASHN VTON pipeline. Returns True on success."""
         if self._available is not None:
+            print(f"[DEBUG VTON] _try_load_pipeline cached: _available={self._available}", flush=True)
             return self._available
+        print(f"[DEBUG VTON] Loading pipeline from {self.weights_dir}...", flush=True)
         try:
             from fashn_vton import TryOnPipeline
 
             self._pipeline = TryOnPipeline(str(self.weights_dir))
             self._available = True
+            print("[DEBUG VTON] Pipeline loaded successfully!", flush=True)
             logger.info("FASHN VTON pipeline loaded from %s", self.weights_dir)
         except ImportError as e:
             self._available = False
             self._load_error = str(e)
+            print(f"[DEBUG VTON] ImportError: {e}", flush=True)
             logger.error(
                 "FASHN VTON import failed (is fashn-vton installed? "
                 "Run: pip install -e server/lib/fashn-vton): %s", e,
@@ -41,6 +45,7 @@ class TryOnWorker:
         except Exception as e:
             self._available = False
             self._load_error = str(e)
+            print(f"[DEBUG VTON] Exception ({type(e).__name__}): {e}", flush=True)
             logger.error("FASHN VTON pipeline failed to load: %s", e)
         return self._available
 
