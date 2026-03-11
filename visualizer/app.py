@@ -395,15 +395,21 @@ def run_pipeline(
     garment_paths, category, garment_photo_type,
     height_cm, weight_kg, fabric,
 ):
-    import datetime
-    with open("/tmp/vton_debug.log", "a") as f:
-        f.write(f"\n[{datetime.datetime.now()}] run_pipeline() called\n")
-        f.write(f"  garment_paths={garment_paths}\n")
-        f.write(f"  front={front_photo_path}\n")
+    # Force reload ALL pipeline modules from disk to bust sys.modules cache
+    import importlib
+    import server.core.tryon_worker
+    import server.core.diagnostics
+    import server.main_pipeline
+    importlib.reload(server.core.diagnostics)
+    importlib.reload(server.core.tryon_worker)
+    importlib.reload(server.main_pipeline)
     from server.main_pipeline import VTONPipeline
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     pipeline = VTONPipeline()
-    result = pipeline.run(
+    import time
+    st.session_state["_pipeline_ts"] = time.time()
+    return pipeline.run(
         front_photo=front_photo_path,
         garment_photos=garment_paths,
         category=category,
@@ -414,10 +420,6 @@ def run_pipeline(
         weight_kg=weight_kg if weight_kg and weight_kg > 0 else None,
         fabric=fabric,
     )
-    with open("/tmp/vton_debug.log", "a") as f:
-        f.write(f"  pipeline returned, pipeline_log={result.get('pipeline_log')}\n")
-        f.write(f"  tryon_results={result.get('tryon_results')}\n")
-    return result
 
 
 def run_single_tryon(person_path, garment_path, category, garment_photo_type, output_path):
@@ -708,14 +710,20 @@ def render_step_results():
     _tryon = sizing_data.get("tryon_results", {}) if sizing_data else {}
     _garments = st.session_state.get("garment_paths", [])
     try:
-        from server.core.tryon_worker import TRYON_WORKER_V2
-        _tw_version = "V2"
-    except ImportError:
-        _tw_version = "V1-OLD"
+        import importlib
+        import server.core.tryon_worker
+        importlib.reload(server.core.tryon_worker)
+        _tw_version = f"V2={server.core.tryon_worker.TRYON_WORKER_V2}"
+    except Exception as _e:
+        _tw_version = f"OLD({_e})"
+    import time
+    _ts = st.session_state.get("_pipeline_ts", 0)
+    _age = round(time.time() - _ts) if _ts else "never"
     st.warning(
         f"DEBUG: data_source={'session_state' if _from_session else 'file'}, "
         f"pipeline_ran={st.session_state.get('pipeline_ran')}, "
         f"tryon_worker={_tw_version}, "
+        f"pipeline_age={_age}s, "
         f"pipeline_log_entries={len(_plog)}, "
         f"tryon_results={_tryon}, "
         f"garment_paths={_garments}"
