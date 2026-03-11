@@ -701,15 +701,16 @@ def render_step_results():
     st.header("Step 4: Results")
 
     sizing_data = st.session_state.get("sizing_result")
-    import datetime
-    with open("/tmp/vton_debug.log", "a") as f:
-        f.write(f"\n[{datetime.datetime.now()}] render_step_results()\n")
-        f.write(f"  session_state sizing_result is None: {sizing_data is None}\n")
-        f.write(f"  sizing_result.json exists: {DEFAULT_SIZING_PATH.exists()}\n")
+    _from_session = sizing_data is not None
     if sizing_data is None and DEFAULT_SIZING_PATH.exists():
         sizing_data = json.loads(DEFAULT_SIZING_PATH.read_text())
-        with open("/tmp/vton_debug.log", "a") as f:
-            f.write(f"  LOADED FROM FILE: pipeline_log={sizing_data.get('pipeline_log')}\n")
+    _plog = sizing_data.get("pipeline_log", []) if sizing_data else []
+    st.warning(
+        f"DEBUG: data_source={'session_state' if _from_session else 'file'}, "
+        f"pipeline_ran={st.session_state.get('pipeline_ran')}, "
+        f"pipeline_log_entries={len(_plog)}, "
+        f"sizing_result.json_exists={DEFAULT_SIZING_PATH.exists()}"
+    )
 
     if not sizing_data:
         st.info("No results yet. Run the pipeline first.")
