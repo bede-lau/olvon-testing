@@ -48,18 +48,24 @@ def upscale_person(img: Image.Image) -> Image.Image:
 
 
 def remove_background(img: Image.Image) -> Image.Image:
-    """Remove background using BiRefNet-portrait; returns RGBA."""
-    import torch
+    """Remove background using BiRefNet-portrait; returns RGBA.
+
+    Uses CPU-only ONNX to avoid holding GPU memory that conflicts with
+    downstream PyTorch models (FASHN VTON). ONNX Runtime's CUDA allocator
+    is separate from PyTorch's and cannot be freed by torch.cuda.empty_cache().
+    """
     from rembg import remove, new_session
-    session = new_session("birefnet-portrait")
+    try:
+        session = new_session("birefnet-portrait", providers=["CPUExecutionProvider"])
+    except TypeError:
+        # Older rembg versions don't accept providers kwarg
+        import os
+        os.environ["ONNXRUNTIME_PROVIDERS"] = "CPUExecutionProvider"
+        session = new_session("birefnet-portrait")
     try:
         return remove(img, session=session)
     finally:
-        import gc
         del session
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
 
 def prepare_person_for_vton(person_img: Image.Image) -> Image.Image:

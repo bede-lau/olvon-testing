@@ -33,7 +33,7 @@ def regenerate_person(
 
         app = FaceAnalysis(
             name="buffalo_l",
-            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+            providers=["CPUExecutionProvider"],
         )
         app.prepare(ctx_id=0, det_size=(640, 640))
         faces = app.get(np.array(webcam_img.convert("RGB"))[:, :, ::-1])  # RGB->BGR
@@ -41,7 +41,9 @@ def regenerate_person(
             logger.warning("No face detected — cannot regenerate")
             return None
         face_embed = torch.tensor(faces[0].normed_embedding).unsqueeze(0)
+        import gc
         del app
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
@@ -90,7 +92,9 @@ def regenerate_person(
         ).images[0]
 
         # 5. Cleanup
+        import gc
         del pipe, controlnet
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
