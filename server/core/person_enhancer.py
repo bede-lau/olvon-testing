@@ -40,7 +40,9 @@ def upscale_person(img: Image.Image) -> Image.Image:
         out_np, _ = upsampler.enhance(img_np, outscale=4)
         return Image.fromarray(out_np)
     finally:
+        import gc
         del upsampler, model
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
@@ -53,7 +55,9 @@ def remove_background(img: Image.Image) -> Image.Image:
     try:
         return remove(img, session=session)
     finally:
+        import gc
         del session
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 

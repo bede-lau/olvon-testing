@@ -103,6 +103,16 @@ class VTONPipeline:
             except Exception as e2:
                 logger.warning("Enhancement also failed (%s), using original photo", e2)
 
+        # Flush VRAM after Stage 0 before loading FASHN VTON
+        try:
+            import gc
+            import torch
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+
         # Stage 1: Body measurements (uses ORIGINAL front_photo for landmarks)
         logger.info("=== Stage 1: Body Measurements ===")
         measurements = extract_measurements(
