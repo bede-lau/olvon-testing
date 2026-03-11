@@ -705,12 +705,17 @@ def render_step_results():
     if sizing_data is None and DEFAULT_SIZING_PATH.exists():
         sizing_data = json.loads(DEFAULT_SIZING_PATH.read_text())
     _plog = sizing_data.get("pipeline_log", []) if sizing_data else []
+    _tryon = sizing_data.get("tryon_results", {}) if sizing_data else {}
+    _garments = st.session_state.get("garment_paths", [])
     st.warning(
         f"DEBUG: data_source={'session_state' if _from_session else 'file'}, "
         f"pipeline_ran={st.session_state.get('pipeline_ran')}, "
         f"pipeline_log_entries={len(_plog)}, "
-        f"sizing_result.json_exists={DEFAULT_SIZING_PATH.exists()}"
+        f"tryon_results={_tryon}, "
+        f"garment_paths={_garments}"
     )
+    if _plog:
+        st.error(f"DEBUG full pipeline_log: {_plog}")
 
     if not sizing_data:
         st.info("No results yet. Run the pipeline first.")
