@@ -1,13 +1,30 @@
 # CLAUDE.md Maintenance Patterns
 
-Reference for keeping CLAUDE.md files current and useful.
+Reference for keeping CLAUDE.md files current and useful across any repository.
 
-## File Locations
+## Context File Discovery
 
-| File | Path | Scope |
-|------|------|-------|
-| Mobile App | `CLAUDE.md` (root) | Expo, React Native, components, hooks, stores |
-| GPU Worker | `heavy-functions/CLAUDE.md` | FastAPI, Python services, ML pipeline |
+At session start (Step 0B of prompt-orchestrator), discover all context files:
+
+1. Find all `CLAUDE.md` files in the repo (root + all subdirectories)
+2. Find all `README.md` files in the repo (root + all subdirectories)
+3. Read all discovered files
+4. Use them for architecture decisions, conventions, and known gaps
+
+## Proximity Rule: Which CLAUDE.md to Update
+
+After making changes, update the CLAUDE.md **closest** to the changed files:
+
+```
+Changed file path → Check for CLAUDE.md moving up the directory tree
+
+Example: server/core/tryon_worker.py was modified
+  → Does server/core/CLAUDE.md exist? → Update it
+  → Does server/CLAUDE.md exist?      → Update it
+  → Fall back to root CLAUDE.md
+```
+
+**Also update root README.md** if the change is user-facing or architectural.
 
 ## Section Update Patterns
 
@@ -35,11 +52,11 @@ Reference for keeping CLAUDE.md files current and useful.
 - New convention: description of when/how to apply
 ```
 
-### Custom Hooks
-**Update when:** Creating hooks with non-obvious behavior or dependencies
+### Custom Hooks / Modules
+**Update when:** Creating hooks or modules with non-obvious behavior or dependencies
 
 ```markdown
-## Custom Hooks (Section)
+## Custom Hooks (or relevant section)
 - `useNewHook()` - Brief description, returns { data, loading, error, refresh }
 ```
 
@@ -48,7 +65,7 @@ Reference for keeping CLAUDE.md files current and useful.
 
 ```markdown
 ## [Feature] Architecture
-- **Component:** `path/to/file.tsx` - What it does
+- **Component:** `path/to/file.py` - What it does
 - **State:** How state is managed
 - **Flow:** Step 1 → Step 2 → Step 3
 ```
@@ -61,7 +78,7 @@ Reference for keeping CLAUDE.md files current and useful.
 - **New Gap:** Description — what needs to be done to resolve
 ```
 
-### API Endpoints (heavy-functions)
+### API Endpoints
 **Update when:** Adding or modifying endpoints
 
 ```markdown
@@ -71,46 +88,47 @@ Reference for keeping CLAUDE.md files current and useful.
 
 ## Update Examples
 
-### Example 1: New Hook Created
+### Example 1: New Module Created
 
-**Change:** Created `hooks/useNewFeature.ts`
+**Change:** Created `server/core/new_worker.py`
 
-**Update to CLAUDE.md:**
+**Proximity check:** Does `server/core/CLAUDE.md` exist? → `server/CLAUDE.md`? → root `CLAUDE.md`
+
+**Update to closest CLAUDE.md:**
 ```markdown
-## Custom Hooks
-- `useNewFeature()` - Fetches X data with caching, returns { data, loading, refetch }
+## Pipeline Components
+- `server/core/new_worker.py` - Does X with Y, returns Z
 ```
 
 ### Example 2: Architecture Change
 
 **Change:** Modified auth flow to use refresh tokens
 
-**Update to CLAUDE.md:**
+**Update to closest CLAUDE.md:**
 ```markdown
-## OAuth Flow Architecture
+## Auth Architecture
 - **Token refresh:** AuthProvider now handles automatic token refresh via `refreshSession()`
 - 15-minute token expiry with silent refresh
 ```
 
 ### Example 3: New Convention
 
-**Change:** Established pattern for error boundaries
+**Change:** Established pattern for error handling
 
-**Update to CLAUDE.md:**
+**Update to closest CLAUDE.md:**
 ```markdown
 ## Code Conventions
-- Error boundaries wrap all route components in `app/_layout.tsx`
-- Use `ErrorBoundary` from `components/ui/ErrorBoundary.tsx` for feature-level errors
+- All ML fallbacks logged via `diagnostics.py` with GPU state snapshot
 ```
 
 ### Example 4: Gap Discovery
 
 **Change:** Found that image caching isn't implemented
 
-**Update to CLAUDE.md:**
+**Update to closest CLAUDE.md:**
 ```markdown
 ## Known Gaps
-- **Image caching:** Feed images re-download on each render — implement expo-image or react-native-fast-image
+- **Image caching:** Feed images re-download on each render — implement caching layer
 ```
 
 ## When NOT to Update
@@ -129,16 +147,5 @@ Before updating CLAUDE.md:
 2. [ ] Would another developer need to know this?
 3. [ ] Is it concise (1-2 lines if possible)?
 4. [ ] Does it match existing formatting?
-5. [ ] Is it in the right section?
-
-## Path Detection Keywords
-
-Use these to determine which CLAUDE.md to update:
-
-**Root CLAUDE.md (mobile-app):**
-- `mobile-app/`, `app/`, `components/`, `hooks/`, `store/`, `lib/`, `types/`
-- Keywords: Expo, React Native, screen, component, hook, Zustand
-
-**heavy-functions/CLAUDE.md:**
-- `heavy-functions/`, `api/`, `services/`, `config/`
-- Keywords: FastAPI, Python, endpoint, service, GPU, ML, Blender
+5. [ ] Is it in the right section (closest CLAUDE.md to the changed files)?
+6. [ ] Does the change also warrant a README.md update at repo root?

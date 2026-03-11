@@ -6,7 +6,6 @@ echo "=== Olvon VTON - Setup ==="
 # Install base requirements
 echo "[1/4] Installing base requirements..."
 pip install -r requirements.txt
-pip install "rembg[gpu]" realesrgan basicsr
 
 # Install FASHN VTON
 echo "[2/4] Installing FASHN VTON..."

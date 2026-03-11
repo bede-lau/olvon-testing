@@ -413,6 +413,14 @@ def run_pipeline(
 
 def run_single_tryon(person_path, garment_path, category, garment_photo_type, output_path):
     """Run a single try-on for the virtual dressing room (on-demand)."""
+    # Prefer regenerated person image if available
+    regen_path = Path("server/outputs/person_regenerated.png")
+    enhanced_path = Path("server/outputs/person_enhanced.png")
+    if regen_path.exists():
+        person_path = str(regen_path)
+    elif enhanced_path.exists():
+        person_path = str(enhanced_path)
+
     from server.core.tryon_worker import TryOnWorker
     worker = TryOnWorker()
     return worker.generate(

@@ -15,6 +15,25 @@ from server.core.diagnostics import PipelineLog, log_fallback
 logger = logging.getLogger(__name__)
 
 
+def _detect_codec() -> str:
+    """Detect best available video codec: libx264 > libx265 > mpeg4."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return "libx264"
+    try:
+        r = subprocess.run(
+            [ffmpeg, "-hide_banner", "-codecs"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for codec in ("libx264", "libx265", "mpeg4"):
+            if codec in r.stdout:
+                logger.info("Using video codec: %s", codec)
+                return codec
+    except Exception:
+        pass
+    return "libx264"
+
+
 def build_ffmpeg_cmd(
     image_paths: list[str | Path],
     output_path: str | Path,
@@ -37,6 +56,7 @@ def build_ffmpeg_cmd(
     if n == 0:
         return []
 
+    codec = _detect_codec()
     cmd = ["ffmpeg", "-y"]
 
     # Input files
@@ -44,10 +64,10 @@ def build_ffmpeg_cmd(
         cmd += ["-loop", "1", "-t", str(duration), "-i", str(p)]
 
     if n == 1:
-        # Single image → simple video
+        # Single image → simple video (format=yuv420p in filter, no separate -pix_fmt)
         cmd += [
             "-vf", "scale=1080:1440:force_original_aspect_ratio=decrease,pad=1080:1440:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-c:v", codec,
             "-t", str(duration),
             str(output_path),
         ]
@@ -77,7 +97,7 @@ def build_ffmpeg_cmd(
     cmd += [
         "-filter_complex", filter_str,
         "-map", "[out]",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-c:v", codec,
         str(output_path),
     ]
     return cmd

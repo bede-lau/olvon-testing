@@ -8,4 +8,15 @@ mediapipe>=0.10.30
 opencv-python>=4.8.0
 streamlit-webrtc>=0.45.0
 av>=10.0.0
+# Person enhancer (bg removal + upscale)
+rembg[gpu]
+realesrgan
+basicsr
+# Person regenerator (SD1.5 + ControlNet + IP-Adapter)
+diffusers>=0.25.0
+transformers>=4.36.0
+accelerate>=0.25.0
+insightface>=0.7.0
+onnxruntime-gpu
+controlnet_aux
 # fashn-vton: installed via setup.sh (pip install -e server/lib/fashn-vton)

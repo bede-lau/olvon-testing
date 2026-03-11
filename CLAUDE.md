@@ -27,8 +27,10 @@ Every stage tries real inference first, then falls back gracefully:
 | `client/utils/pose_validator.py` | MediaPipe landmark visibility + stability + orientation detection |
 | `client/utils/audio_feedback.py` | pyttsx3 TTS wrapper with graceful fallback |
 | `server/core/body_measurements.py` | MediaPipe pose landmarks → body measurements (chest, waist, hip, shoulder_width) with fallback chain |
+| `server/core/person_regenerator.py` | SD1.5 + ControlNet + IP-Adapter person regeneration (webcam → neutral pose, white bg) |
+| `server/core/person_enhancer.py` | Real-ESRGAN upscale + BiRefNet background removal (fallback for regenerator) |
 | `server/core/tryon_worker.py` | FASHN VTON v1.5 wrapper — person photo + garment photo → 2D try-on image |
-| `server/core/feed_generator.py` | FFmpeg-based feed video generator (1080x1440, crossfade slideshow) |
+| `server/core/feed_generator.py` | FFmpeg-based feed video generator (1080x1440, crossfade slideshow, auto codec detection) |
 | `server/core/sizing_logic.py` | Math-based size recommendation from body measurements + height/weight/BMI |
 | `server/core/diagnostics.py` | Shared `PipelineLog`, `log_fallback()`, `get_gpu_snapshot()` for structured fallback logging |
 | `server/main_pipeline.py` | CLI orchestrator: measurements → try-on → sizing → feed video |
@@ -36,10 +38,17 @@ Every stage tries real inference first, then falls back gracefully:
 
 ## Pipeline Flow
 
-1. `body_measurements.extract(front_photo, side_photo, height, weight)` → measurements dict
-2. `tryon_worker.generate()` per garment × per view (front + back) → try-on images
+0. `person_regenerator.regenerate_person(webcam_img)` → neutral-pose person on white bg (fallback: `person_enhancer` → raw photo)
+1. `body_measurements.extract(front_photo, side_photo, height, weight)` → measurements dict (uses ORIGINAL photo)
+2. `tryon_worker.generate()` per garment × per view (front + back) → try-on images (uses REGENERATED person)
 3. `sizing_logic.recommend_size(measurements)` → sizing result
 4. `feed_generator.generate_feed_video(front_tryon_images)` → feed video
+
+### Person Preparation Fallback Chain
+
+1. **person_regenerator** (SD1.5 + ControlNet + IP-Adapter) — best quality, neutral pose, white bg
+2. **person_enhancer** (Real-ESRGAN + BiRefNet) — medium quality, original pose, white bg
+3. **Raw webcam photo** — last resort
 
 ## Sizing Logic
 
@@ -81,6 +90,11 @@ streamlit run visualizer/app.py --server.address=0.0.0.0
 | MediaPipe Pose | Task file (~26 MB) | `client/assets/pose_landmarker_heavy.task` — auto-downloaded on first use | Apache 2.0 |
 | RealESRGAN_x4plus | Upscaler (~67 MB) | `~/.cache/realesrgan/` — auto-downloaded on first use | **BSD 3-Clause** |
 | BiRefNet-portrait | Segmentation (~168 MB) | `~/.u2net/` — auto-downloaded by rembg on first use | Apache 2.0 |
+| SD1.5 base | Diffusion model (~4 GB) | `~/.cache/huggingface/` — auto-downloaded on first use | CreativeML OpenRAIL-M |
+| ControlNet OpenPose | ControlNet (~1.5 GB) | `~/.cache/huggingface/` — auto-downloaded on first use | Apache 2.0 |
+| IP-Adapter FaceID Plus v2 | Adapter (~1.5 GB) | `~/.cache/huggingface/` — auto-downloaded on first use | Apache 2.0 |
+| InsightFace buffalo_l | Face analysis (~300 MB) | `~/.insightface/` — auto-downloaded on first use | MIT |
+| Neutral pose skeleton | Static asset (50 KB) | `client/assets/neutral_pose_skeleton.png` — committed | N/A |
 
 **Real-ESRGAN BSD 3-Clause requirement:** When distributing an app, reproduce the copyright notice
 (`Copyright (c) 2021, xinntao`) and the three BSD conditions in the documentation or About section.
@@ -107,6 +121,7 @@ Full license text is in `README.md` under "Third-Party Licenses".
 
 ## Known Gaps
 
+- Person regeneration requires ~10 GB VRAM peak; recommended 24 GB GPU for full pipeline
 - FASHN VTON requires CUDA GPU (~8GB VRAM) for inference
 - FFmpeg required for feed video generation
 - Back-view orientation detection is unreliable (MediaPipe may not detect pose); uses face-absence + countdown

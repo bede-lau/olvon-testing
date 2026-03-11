@@ -63,7 +63,47 @@ class VTONPipeline:
         """
         front_photo = Path(front_photo)
 
-        # Stage 1: Body measurements
+        # Stage 0: Person regeneration
+        logger.info("=== Stage 0: Person Regeneration ===")
+        person_for_tryon = front_photo  # default fallback
+        regenerated_path = self.output_dir / "person_regenerated.png"
+        try:
+            from server.core.person_regenerator import regenerate_person
+            from PIL import Image
+
+            webcam_img = Image.open(front_photo).convert("RGB")
+            regen = regenerate_person(webcam_img, regenerated_path)
+            if regen:
+                person_for_tryon = regenerated_path
+                logger.info("Using regenerated person image")
+            else:
+                logger.info("Regeneration unavailable, falling back to enhancer")
+                try:
+                    from server.core.person_enhancer import prepare_person_for_vton
+
+                    enhanced = prepare_person_for_vton(webcam_img)
+                    enhanced_path = self.output_dir / "person_enhanced.png"
+                    enhanced.save(str(enhanced_path))
+                    person_for_tryon = enhanced_path
+                    logger.info("Using enhanced person image (bg removal + upscale)")
+                except Exception as e2:
+                    logger.warning("Enhancement also failed (%s), using original photo", e2)
+        except Exception as e:
+            logger.warning("Regeneration failed (%s), trying enhancer", e)
+            try:
+                from server.core.person_enhancer import prepare_person_for_vton
+                from PIL import Image
+
+                webcam_img = Image.open(front_photo).convert("RGB")
+                enhanced = prepare_person_for_vton(webcam_img)
+                enhanced_path = self.output_dir / "person_enhanced.png"
+                enhanced.save(str(enhanced_path))
+                person_for_tryon = enhanced_path
+                logger.info("Using enhanced person image (bg removal + upscale)")
+            except Exception as e2:
+                logger.warning("Enhancement also failed (%s), using original photo", e2)
+
+        # Stage 1: Body measurements (uses ORIGINAL front_photo for landmarks)
         logger.info("=== Stage 1: Body Measurements ===")
         measurements = extract_measurements(
             front_photo,
@@ -87,10 +127,10 @@ class VTONPipeline:
 
             garment_results = {}
 
-            # Front view
+            # Front view (use regenerated/enhanced person)
             front_out = self.output_dir / f"tryon_front_{i}.png"
             front_result = self.tryon.generate(
-                person_path=front_photo,
+                person_path=person_for_tryon,
                 garment_path=gpath,
                 category=category,
                 output_path=front_out,

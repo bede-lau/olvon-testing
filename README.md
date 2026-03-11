@@ -36,7 +36,7 @@ falls back gracefully (VTON → None, landmarks → empirical formulas → popul
 ## Prerequisites
 
 - **Python 3.10+**
-- **CUDA GPU** (~8GB VRAM) for FASHN VTON inference
+- **CUDA GPU** (24GB VRAM recommended; 12GB works with reduced quality — see VRAM table below)
 - **PyTorch >= 2.4.0** (required by fashn-vton-1.5)
 - **FFmpeg** for feed video generation
 - **Vast.ai account** (for GPU instance)
@@ -105,10 +105,30 @@ Two separate resources to configure — GPU VRAM and disk storage are independen
 
 | Resource | Requirement | Where to set it |
 |----------|------------|-----------------|
-| **GPU VRAM** | 8GB+ (RTX 3090 = 24GB, RTX 4090 = 24GB) | Choose a GPU model in the instance list |
+| **GPU VRAM** | **24GB recommended** (RTX 3090, RTX 4090, A5000) | Choose a GPU model in the instance list |
 | **Container Size** | **30GB recommended** | The "Container Size" field on the rent/create screen — increase it before confirming |
 
-**Why 30GB?** The base PyTorch image uses ~13GB, PyTorch 2.4 upgrade adds ~2.5GB, FASHN
+**Why 24GB VRAM?** The pipeline runs multiple ML models sequentially. Each stage unloads
+before the next, but the peak during person regeneration reaches ~10 GB of static weights
+plus ~2-4 GB of intermediate tensors and CUDA overhead:
+
+| Stage | What runs | VRAM peak |
+|-------|-----------|-----------|
+| 0a. Face embedding | InsightFace buffalo_l | ~1 GB |
+| 0b. Person regeneration | SD1.5 + ControlNet + IP-Adapter (fp16) | **~10 GB** |
+| 1. Virtual try-on | FASHN VTON v1.5 | **~8 GB** |
+| *(fallback)* Upscale | Real-ESRGAN x4plus | ~2 GB |
+| *(fallback)* BG removal | BiRefNet-portrait | ~1.5 GB |
+
+A 12 GB card (RTX 3060/4070) sits right at the edge during Stage 0b once you account for
+PyTorch's CUDA context (~0.5-1 GB), memory fragmentation, and the CPU→GPU weight transfer
+overlap during model loading. 24 GB eliminates OOM risk across all stages.
+
+> **On a 12 GB GPU:** person regeneration is skipped automatically and the pipeline falls
+> back to the enhancer path (Real-ESRGAN + BiRefNet, ~3.5 GB peak) then FASHN VTON (~8 GB
+> peak). You get background removal but keep the original pose instead of a neutral one.
+
+**Why 30GB disk?** The base PyTorch image uses ~13GB, PyTorch 2.4 upgrade adds ~2.5GB, FASHN
 VTON weights ~2GB, other packages ~500MB — totalling ~18GB. 30GB gives ~12GB headroom for
 output images and temp files during inference without paying for unnecessary space.
 
@@ -299,24 +319,20 @@ python -m server.main_pipeline \
 | MediaPipe Pose | ~26 MB | `client/assets/pose_landmarker_heavy.task` — auto-downloaded on first use | Apache 2.0 |
 | RealESRGAN_x4plus | ~67 MB | `~/.cache/realesrgan/` — downloaded on first use by `person_enhancer.py` | BSD 3-Clause |
 | BiRefNet-portrait | ~168 MB | `~/.u2net/` — downloaded on first use by `rembg` | Apache 2.0 |
+| SD1.5 base | ~4 GB | `~/.cache/huggingface/` — downloaded on first use by `person_regenerator.py` | CreativeML OpenRAIL-M |
+| ControlNet OpenPose | ~1.5 GB | `~/.cache/huggingface/` — downloaded on first use | Apache 2.0 |
+| IP-Adapter FaceID Plus v2 | ~1.5 GB | `~/.cache/huggingface/` — downloaded on first use | Apache 2.0 |
+| InsightFace buffalo_l | ~300 MB | `~/.insightface/` — downloaded on first use | MIT |
 
-### Person Enhancement Pipeline
+### Person Preparation Pipeline
 
-`server/core/person_enhancer.py` runs two models sequentially before FASHN VTON inference:
+Before FASHN VTON, the pipeline prepares a clean person image using a three-tier fallback:
 
-1. **Real-ESRGAN x4plus** — 4× upscale of the webcam photo (identity-preserving, no face hallucination)
-2. **BiRefNet-portrait** — background removal to a clean white canvas
+1. **Person Regenerator** (`server/core/person_regenerator.py`) — SD1.5 + ControlNet OpenPose + IP-Adapter FaceID Plus v2. Generates a new image of the person in a neutral standing pose (arms at sides) on white background, preserving facial identity. Best VTON input quality.
+2. **Person Enhancer** (`server/core/person_enhancer.py`) — Real-ESRGAN 4× upscale + BiRefNet background removal to white canvas. Original pose preserved. Used when regeneration deps are missing or fail.
+3. **Raw webcam photo** — last resort if both above fail.
 
-VRAM usage is sequential (models unloaded between steps):
-
-| Step | Model | VRAM peak | Duration |
-|------|-------|-----------|---------|
-| Real-ESRGAN 4× | realesrgan-x4plus | ~2 GB | ~2 s |
-| BiRefNet cutout | birefnet-portrait | ~1.5 GB | ~1 s |
-| FASHN VTON | diffusion model | ~8 GB | ~30–60 s |
-| **Peak (FASHN VTON)** | | **~8 GB** | |
-
-Both stages fall back gracefully if the libraries are unavailable.
+All models are unloaded between stages via `del` + `torch.cuda.empty_cache()`.
 
 ---
 
@@ -440,7 +456,9 @@ The system uses face-absence detection with a 5-second countdown for back view. 
 "Skip validation" if auto-detection fails.
 
 **CUDA out of memory**
-FASHN VTON needs ~8GB VRAM. Use a GPU with sufficient memory (RTX 3090+).
+Person regeneration peaks at ~10 GB and FASHN VTON needs ~8 GB. Use a 24 GB GPU (RTX 3090+)
+for the full pipeline. On 12 GB GPUs, regeneration is skipped automatically and the enhancer
+fallback (Real-ESRGAN + BiRefNet) is used instead.
 
 **Nested duplicate directories (`olvon-testing/olvon-testing/...`)**
 You ran `git clone ... && cd olvon-testing` while already inside the repo. Navigate back:

@@ -15,25 +15,32 @@ Analyze every incoming prompt and orchestrate the appropriate skills for optimal
 
 ---
 
+## Step 0A: Load All Skills (once per conversation)
+
+**At session start, before routing:**
+
+1. Glob `.claude/skills/*/SKILL.md` to list all installed skills
+2. Read each SKILL.md (name + description from frontmatter + body)
+3. Mark as loaded — do NOT re-read within the same conversation
+4. Use these to inform routing decisions in Step 1
+
+**`context-optimizer` and `skill-creator` are always present.** Never say "if installed" for either — treat both as unconditionally active.
+
+---
+
+## Step 0B: Load Project Context (once per conversation)
+
+**At session start, before routing:**
+
+1. Find all `CLAUDE.md` files: repo root + any subdirectory containing one
+2. Find all `README.md` files: repo root + any subdirectory containing one
+3. Read all discovered files
+4. Mark as loaded — do NOT re-read within the same conversation
+5. Use for architecture decisions, conventions, and known gaps
+
+---
+
 ## CLAUDE.md Context Management
-
-### Context Files
-
-| File | Scope | When to Load |
-|------|-------|--------------|
-| `CLAUDE.md` (root) | Mobile app (Expo/React Native) | Work in `mobile-app/`, components, hooks, stores, app routes |
-| `heavy-functions/CLAUDE.md` | GPU Worker (Python/FastAPI) | Work in `heavy-functions/`, API routes, services, ML pipeline |
-
-### Step 0: Load Context (BEFORE routing)
-
-**At session start or when switching domains:**
-
-1. **Detect working directory** from the prompt or file paths mentioned
-2. **Load relevant CLAUDE.md**:
-   - `mobile-app/*`, `components/*`, `hooks/*`, `store/*`, `app/*` → Read root `CLAUDE.md`
-   - `heavy-functions/*`, `api/*`, `services/*` → Read `heavy-functions/CLAUDE.md`
-   - Both mentioned → Read both
-3. **Use context** for architecture decisions, conventions, known gaps
 
 ### CLAUDE.md Update Triggers
 
@@ -53,14 +60,17 @@ Analyze every incoming prompt and orchestrate the appropriate skills for optimal
 
 **After completing significant changes:**
 
-1. **Identify scope** - Which CLAUDE.md is affected?
-2. **Determine section** - What section needs update?
-3. **Make minimal edit** - Add only essential info, keep concise
-4. **Preserve structure** - Match existing formatting and tone
+1. **Identify scope** — which CLAUDE.md is closest to the changed files?
+   - Changed file in `server/core/tryon_worker.py`? → Check for `server/CLAUDE.md` first, then root `CLAUDE.md`
+   - Changed file in root or no subdirectory CLAUDE.md? → Update root `CLAUDE.md`
+2. **Determine section** — what section needs updating?
+3. **Make minimal edit** — add only essential info, keep concise
+4. **Preserve structure** — match existing formatting and tone
+5. **Update README.md** at repo root if the change is user-facing or architectural
 
 **Update format:**
 ```
-Updated `CLAUDE.md` - Added [brief description] to [section name]
+Updated `CLAUDE.md` — Added [brief description] to [section name]
 ```
 
 ### What to Add vs. Skip
@@ -80,11 +90,9 @@ Updated `CLAUDE.md` - Added [brief description] to [section name]
 
 ---
 
-## Clarifying Questions (New Features & Major Changes)
+## Clarifying Questions
 
-**BEFORE planning or implementing new features/major changes, ask clarifying questions.**
-
-### When to Ask
+**BEFORE planning or implementing, ask clarifying questions when:**
 
 | Trigger | Examples |
 |---------|----------|
@@ -92,43 +100,16 @@ Updated `CLAUDE.md` - Added [brief description] to [section name]
 | **Major change** | "Refactor auth", "Change how X works", "Redesign the feed" |
 | **Ambiguous scope** | "Improve performance", "Make it better", "Fix the UX" |
 | **Multiple valid approaches** | Could use different patterns, libraries, or architectures |
+| **Any decision with multiple valid paths** | Which file to edit, which pattern to follow |
+| **Task touching more than 2 files** | Exact approach isn't obvious |
 | **User-facing changes** | Affects UI, behavior, or data the user interacts with |
-
-### Question Categories
-
-Ask questions from relevant categories:
-
-**1. Scope & Requirements**
-- What specific functionality is needed?
-- What should happen when [edge case]?
-- Are there any features explicitly NOT wanted?
-
-**2. User Experience**
-- How should the user interact with this?
-- What feedback should the user see (loading, success, error)?
-- Should this work offline?
-
-**3. Data & State**
-- Where should data come from (API, local, mock)?
-- Should data persist across sessions?
-- How does this relate to existing data/state?
-
-**4. Integration**
-- How does this connect to existing features?
-- Are there dependencies on other systems?
-- Should this trigger notifications/events elsewhere?
-
-**5. Constraints**
-- Any performance requirements?
-- Must it match existing patterns or can it differ?
-- Timeline or complexity constraints?
 
 ### Clarification Process
 
 ```
-1. Read prompt → Detect new feature or major change
+1. Read prompt → Detect any of the above triggers
 2. Identify gaps → What's unclear or has multiple interpretations?
-3. Ask 2-4 focused questions → Don't overwhelm, prioritize most critical
+3. Ask 2-4 focused questions → Prioritize most critical
 4. Wait for answers → Don't assume or proceed without clarity
 5. Confirm understanding → Summarize before planning
 6. Then proceed to planning/execution
@@ -142,14 +123,6 @@ Before implementing [feature], I need to clarify:
 1. [Most critical question]
 2. [Second priority question]
 3. [Optional: Third question if needed]
-```
-
-**For major changes:**
-```
-This change affects [scope]. To ensure I implement correctly:
-1. [Question about desired behavior]
-2. [Question about edge cases]
-3. [Question about integration points]
 ```
 
 **For ambiguous requests:**
@@ -186,19 +159,19 @@ Analyze the prompt against these categories:
 |----------|------------|---------------|
 | **Bug/Error** | "error", "failing", "broken", "doesn't work", "crash", "unexpected", stack traces, test failures | systematic-debugging |
 | **Implementation** | "build", "create", "implement", "add feature", multi-step task, architectural changes | executing-plans |
-| **Repetitive Pattern** | Same type of task done 3+ times, boilerplate code, recurring workflow | skill-creator |
-| **Existing Skill Match** | Matches description of an installed skill | Route to that skill |
+| **Repetitive Pattern** | Same type of task done 2+ times, boilerplate code, recurring workflow | skill-creator |
+| **Existing Skill Match** | Matches description of an installed skill (loaded in Step 0A) | Route to that skill |
 | **Simple Task** | Single-step, clear action, no complexity | Direct execution |
 
 ### Step 2: Apply Context Optimizer (ALWAYS)
 
 **Every response must follow context-optimizer rules:**
 
-1. **Never repeat content** - No pasting code back, use `file:line` references
-2. **No code unless asked** - Reference locations instead
-3. **Concise by default** - "Done. Component updated." not paragraphs
-4. **No narration** - Don't explain what you're about to do, just do it
-5. **Smart verbosity** - Only elaborate when user asks or decision needs justification
+1. **Never repeat content** — no pasting code back, use `file:line` references
+2. **No code unless asked** — reference locations instead
+3. **Concise by default** — "Done. Component updated." not paragraphs
+4. **No narration** — don't explain what you're about to do, just do it
+5. **Smart verbosity** — only elaborate when user asks or decision needs justification
 
 ### Step 3: Route to Primary Skill
 
@@ -224,31 +197,30 @@ Based on classification:
 
 **For Repetitive Patterns → skill-creator**
 ```
-"This pattern could benefit from a dedicated skill."
+"This looks like a recurring workflow. Want me to create a skill for it now?"
 - Identify the repeating workflow
 - Propose skill structure
 - Create if user approves
 ```
 
-### Step 4: Detect Skill Creation Opportunities
+### Step 4: Proactive Skill Creation
 
-**Flag for potential new skill when:**
+**Propose skill creation immediately when:**
 
-1. **Domain-specific knowledge** needed repeatedly (e.g., specific API, internal schema)
-2. **Same workflow** executed 3+ times in similar form
-3. **Complex procedure** that requires many steps to remember
-4. **External tool integration** that needs specific patterns
-5. **User explicitly mentions** doing something "often" or "regularly"
+1. **2+ occurrences** of the same workflow type (do NOT wait for 3+)
+2. **User says** "I often...", "every time...", "same as before", "again"
+3. **Domain-specific knowledge** needed repeatedly
+4. **Complex procedure** that requires many steps to remember
+5. **External tool integration** that needs specific patterns
 
-**When detected:**
+**When detected, say immediately:**
 ```
-"I notice this task involves [pattern]. Creating a dedicated skill would:
-- Save tokens on future runs
-- Ensure consistent execution
-- Store reusable scripts/references
-
-Should I create a skill for this?"
+"This looks like a recurring workflow. Want me to create a skill for it now?"
 ```
+
+Do not use the softer "flag for potential skill" language — propose it directly.
+
+---
 
 ## Skill Routing Matrix
 
@@ -266,21 +238,28 @@ Should I create a skill for this?"
 | GPU, ML worker | context-optimizer + gpu-worker-patterns | If installed |
 | Mock mode, test doubles | context-optimizer + mock-mode-patterns | If installed |
 
+`context-optimizer` and `skill-creator` are always active — no "if installed" qualifier.
+
+---
+
 ## Decision Tree
 
 ```
 START
   │
-  ├─ Step 0: Load CLAUDE.md context
-  │   mobile-app/* → Read CLAUDE.md
-  │   heavy-functions/* → Read heavy-functions/CLAUDE.md
-  │   ↓
+  ├─ Step 0A: Already loaded skills this conversation?
+  │   NO → Glob + Read all .claude/skills/*/SKILL.md
+  │   YES → Skip
+  │
+  ├─ Step 0B: Already loaded project context this conversation?
+  │   NO → Find + Read all CLAUDE.md and README.md files in repo
+  │   YES → Skip
   │
   ├─ Is this a bug/error/failure?
   │   YES → systematic-debugging (NO FIXES until root cause found)
   │   NO ↓
   │
-  ├─ Is this a new feature or major change?
+  ├─ Is this a new feature, major change, ambiguous, or multi-file task?
   │   YES → ASK CLARIFYING QUESTIONS first
   │         Wait for answers → Confirm understanding
   │         Then proceed to planning ↓
@@ -290,23 +269,22 @@ START
   │   YES → executing-plans (batch execution with checkpoints)
   │   NO ↓
   │
-  ├─ Does this match an existing skill?
+  ├─ Does this match an installed skill? (from Step 0A)
   │   YES → Route to that skill
   │   NO ↓
   │
-  ├─ Is this a repetitive pattern (3+ occurrences)?
-  │   YES → Suggest skill-creator
+  ├─ Is this a repetitive/workflow-specific pattern (2+ occurrences)?
+  │   YES → Propose skill-creator immediately
   │   NO ↓
   │
   ├─ Simple task → Execute directly with context-optimizer rules
-  │   ↓
   │
-  └─ After completion: Update CLAUDE.md if significant changes made
+  └─ After completion: Update closest CLAUDE.md + root README.md if significant
 ```
 
-## Anti-Patterns to Block
+---
 
-**Block these behaviors:**
+## Anti-Patterns to Block
 
 | Anti-Pattern | Correct Behavior |
 |--------------|------------------|
@@ -316,8 +294,11 @@ START
 | Explaining before doing | Just do it |
 | Pasting code back to user | Use `file:line` references |
 | Starting implementation without plan | "Let me create a plan first" |
-| Repeating same workflow manually | "This could be a skill" |
+| Waiting for 3 repeats to propose skill | Propose at 2 occurrences |
+| Saying "if skill-creator is installed" | It's always installed — propose directly |
 | Verbose success messages | "Done. [1-line summary]" |
+
+---
 
 ## Response Templates
 
@@ -327,7 +308,7 @@ Using prompt-orchestrator. This is a [classification].
 Applying: [skill list]
 ```
 
-### Clarifying Questions (New Feature/Major Change)
+### Clarifying Questions
 ```
 Before implementing [feature/change], I need to clarify:
 
@@ -363,8 +344,7 @@ Creating task list for this implementation.
 
 ### Skill Opportunity
 ```
-This pattern repeats. Skill creation would save future tokens.
-Create [skill-name] skill? (y/n)
+This looks like a recurring workflow. Want me to create a skill for it now?
 ```
 
 ### Simple Task
@@ -372,13 +352,17 @@ Create [skill-name] skill? (y/n)
 Done. [1-line summary]
 ```
 
+---
+
 ## Integration with Existing Skills
 
 When multiple skills apply, layer them:
 
-1. **context-optimizer** - Always active (response formatting)
-2. **Primary skill** - Based on task type
-3. **Domain skill** - If task matches domain (mobile, auth, etc.)
+1. **context-optimizer** — always active (response formatting)
+2. **Primary skill** — based on task type
+3. **Domain skill** — if task matches domain (mobile, auth, GPU, etc.)
+
+---
 
 ## Efficiency Metrics
 
@@ -388,23 +372,28 @@ Track these per session:
 - Fix attempts before root cause (target: zero)
 - Unplanned tasks (target: none)
 
+---
+
 ## Remember
 
-- **LOAD CLAUDE.md context first** - Before any task in mobile-app or heavy-functions
-- **CLARIFY before implementing** - New features/major changes require 2-4 focused questions
-- **ALWAYS apply context-optimizer rules** - Every response
-- **NEVER fix before investigating** - Route bugs to systematic-debugging
-- **PLAN before implementing** - Route features to executing-plans
-- **DETECT repetition** - Suggest skill-creator when patterns emerge
-- **ROUTE to domain skills** - When installed and matching
-- **UPDATE CLAUDE.md after significant changes** - Keep documentation current
+- **LOAD skills + project context first** — Step 0A and 0B before any task
+- **CLARIFY before implementing** — new features, ambiguous tasks, multi-file changes
+- **ALWAYS apply context-optimizer rules** — every response
+- **NEVER fix before investigating** — route bugs to systematic-debugging
+- **PLAN before implementing** — route features to executing-plans
+- **DETECT repetition early** — propose skill-creator at 2 occurrences, not 3
+- **ROUTE to domain skills** — using loaded skill list from Step 0A
+- **UPDATE closest CLAUDE.md after significant changes** — keep documentation current
+
+---
 
 ## Session End Checklist
 
 Before ending a session with significant changes:
 
-1. [ ] Were any new hooks/components created? → Update CLAUDE.md
+1. [ ] Were any new components/hooks/modules created? → Update closest CLAUDE.md
 2. [ ] Was architecture modified? → Update relevant section
 3. [ ] Were new patterns established? → Add to Code Conventions
 4. [ ] Were gaps discovered? → Add to Known Gaps
-5. [ ] Were debugging tips learned? → Document for future reference
+5. [ ] Is the change user-facing or architectural? → Update root README.md
+6. [ ] Were debugging tips learned? → Document for future reference
