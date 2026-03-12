@@ -138,33 +138,43 @@ output images and temp files during inference without paying for unnecessary spa
 
 ### 2. Connect from Your Local Machine
 
-Two terminals are required — one for the SSH session and one for the port tunnel.
+> **CRITICAL: Do NOT run Streamlit locally.** If you run `streamlit run visualizer/app.py`
+> on your local Windows/Mac machine (even accidentally), the browser will connect to a local
+> Streamlit process that has no GPU, no `fashn_vton`, and no model weights. The pipeline will
+> silently fail with "FASHN VTON pipeline not available". Streamlit must **only** run on the
+> **vast.ai instance** and be accessed via the SSH port tunnel described below.
 
-**Terminal 1 — main SSH session:**
+**SSH session with port tunnel (single command):**
 
 ```bash
-# [local] — terminal 1
-ssh -A -p <port> root@<host>
+# [local]
+ssh -p <port> root@<host> -L 8501:localhost:8501 -o ServerAliveInterval=30 -o ServerAliveCountMax=5
 ```
 
 | Flag | Purpose |
 |------|---------|
-| `-A` | Forwards your local SSH agent so `git clone` works on the instance |
 | `-p <port>` | The SSH port shown in your vast.ai instance dashboard |
 | `root@<host>` | The IP address shown in your vast.ai instance dashboard |
+| `-L 8501:localhost:8501` | Forwards the remote Streamlit port to your local browser |
+| `-o ServerAliveInterval=30` | Sends keepalive pings every 30s to prevent "Broken pipe" disconnections |
 
-**Terminal 2 — port tunnel (open this after starting Streamlit in terminal 1):**
+Add `-A` if you need SSH agent forwarding for `git clone`.
+
+**Alternative — separate tunnel terminal (if you prefer):**
 
 ```bash
-# [local] — terminal 2
-ssh -N -L 8501:localhost:8501 -p <port> root@<host>
+# [local] — terminal 1 (SSH session)
+ssh -p <port> root@<host> -o ServerAliveInterval=30
+
+# [local] — terminal 2 (port tunnel, keep running)
+ssh -N -L 8501:localhost:8501 -p <port> root@<host> -o ServerAliveInterval=30
 ```
 
-Leave terminal 2 running the entire time you use the app. `http://localhost:8501` in your
+Leave the tunnel running the entire time you use the app. `http://localhost:8501` in your
 browser will only work while this tunnel is active.
 
-> **Verify the connection:** After SSHing into the instance (Terminal 1), run `ssh-add -l`. 
-> If it returns "The agent has no identities" or an error, exit and run `ssh-add ~/.ssh/id_ed25519` 
+> **Verify the connection:** After SSHing into the instance, run `ssh-add -l`.
+> If it returns "The agent has no identities" or an error, exit and run `ssh-add ~/.ssh/id_ed25519`
 > on your local machine before reconnecting with `-A`.
 
 > **Common mistake:** Do not run either SSH command from inside the vast.ai terminal — that
@@ -253,22 +263,20 @@ ls server/lib/fashn-vton/weights/
 
 ### 7. Run the Wizard
 
-> **[vast.ai]**
+> **[vast.ai]** — Run Streamlit on the vast.ai instance, **never** on your local machine.
 
 ```bash
 # [vast.ai]
 streamlit run visualizer/app.py
 ```
 
-Then open a second local terminal and start the port tunnel (if not already running):
+Then open **`http://localhost:8501`** in your browser. This works because the `-L 8501:localhost:8501`
+flag in your SSH command (step 2) tunnels the remote port to your local machine.
 
-```bash
-# [local] — terminal 2
-ssh -N -L 8501:localhost:8501 -p <port> root@<host>
-```
-
-Then open **`http://localhost:8501`** in your browser. The tunnel must stay open the entire
-time you use the app — do not close terminal 2.
+> **How to verify you're connected to vast.ai (not local):** If the pipeline shows
+> "FASHN VTON pipeline not available", you are likely running Streamlit locally. Kill any
+> local Streamlit process (`pkill -f streamlit` on your local machine), ensure the SSH tunnel
+> is active, and only run `streamlit run` on the vast.ai instance.
 
 The wizard has 4 steps:
 
@@ -445,8 +453,12 @@ Do not use backslash line continuations (`\`) when pasting multi-line commands i
 terminal — paste as a single line instead.
 
 **"FASHN VTON pipeline not available"**
-Ensure `fashn-vton` is installed (`pip install -e server/lib/fashn-vton`) and weights
-are present in `server/lib/fashn-vton/weights/`. Requires CUDA GPU.
+**Most common cause:** Streamlit is running on your **local machine** instead of the vast.ai
+instance. Kill any local Streamlit (`pkill -f streamlit` locally), verify the SSH tunnel
+is active (`-L 8501:localhost:8501`), and run `streamlit run visualizer/app.py` only on
+vast.ai. If the issue persists, check that `fashn-vton` is installed on the instance
+(`pip install -e server/lib/fashn-vton`) and weights are present in
+`server/lib/fashn-vton/weights/`. Requires CUDA GPU.
 
 **"FFmpeg not found on PATH"**
 Run `apt install ffmpeg` on the vast.ai instance. Feed video generation is skipped without it.

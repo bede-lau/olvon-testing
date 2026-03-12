@@ -120,6 +120,21 @@ Full license text is in `README.md` under "Third-Party Licenses".
 - **Result API:** Pipeline returns `result.images[0]` (not a PIL Image directly).
 - **Call API:** Pipeline accepts only `person_image`, `garment_image`, `category`, `garment_photo_type`. Parameters `num_inference_steps` and `seed` are **not valid** and will raise `TypeError`.
 
+## Critical: Streamlit Must Run on Vast.ai
+
+**Never run `streamlit run visualizer/app.py` on the local machine.** The user's local machine
+(Windows) has a Python venv without `fashn_vton`, GPU, or model weights. If Streamlit runs
+locally, the browser connects to the local process, and the pipeline silently fails with
+"FASHN VTON pipeline not available" — because `fashn_vton` is only installed on the vast.ai
+instance.
+
+**Required setup:** SSH into vast.ai with `-L 8501:localhost:8501` to tunnel the remote
+Streamlit port. Run `streamlit run visualizer/app.py` on the vast.ai instance only. Access
+via `http://localhost:8501` in the browser.
+
+**Quick diagnostic:** If VTON fails, check `sys.executable` in the Streamlit process. If it
+shows a Windows path (e.g., `C:\Users\...\python.exe`), Streamlit is running locally.
+
 ## Known Gaps
 
 - Person regeneration requires ~10 GB VRAM peak; recommended 24 GB GPU for full pipeline
